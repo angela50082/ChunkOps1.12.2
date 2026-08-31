@@ -1,6 +1,8 @@
 package com.chunkops.verify;
 
 import com.chunkops.core.RegionWriter;
+import com.chunkops.core.RegistrySnapshot;
+import com.chunkops.core.SectionCodec;
 
 import java.io.File;
 import java.io.IOException;
@@ -29,14 +31,22 @@ public class ChunkOpsTool {
         List<String> a = new ArrayList<String>();
         boolean dryRun = false;
         boolean move = false;
-        for (String s : args) {
+        String snapshotPath = null;
+        for (int i = 0; i < args.length; i++) {
+            String s = args[i];
             if (s.equals("--dry-run")) dryRun = true;
             else if (s.equals("--move")) move = true;
+            else if (s.equals("--snapshot") && i + 1 < args.length) snapshotPath = args[++i];
             else a.add(s);
         }
         String cmd = a.get(0);
         if (cmd.equals("stats")) {
             ChunkInspector.scan(new File(a.get(1)), Integer.MAX_VALUE);
+            return;
+        }
+        if (cmd.equals("buckets")) {
+            require(a, 2);
+            opBuckets(new File(a.get(1)), snapshotPath);
             return;
         }
         if (cmd.equals("clear")) {
@@ -200,6 +210,89 @@ public class ChunkOpsTool {
             }
         }
         System.out.println((move ? "move" : "copy") + " 完成: " + copied + " 个 chunk");
+    }
+
+    // ------------------------------------------------------------ buckets
+
+    /** 按模组分桶统计（P0 验收项）。加载 registry-snapshot.json 名称化后分桶；无快照时输出未知 ID 报告。 */
+    static void opBuckets(File world, String snapshotPath) throws IOException {
+        RegistrySnapshot snap = null;
+        if (snapshotPath != null) {
+            snap = RegistrySnapshot.load(new File(snapshotPath));
+            String fp = snap.fingerprint;
+            if (fp.length() > 12) fp = fp.substring(0, 12) + "...";
+            System.out.println("snapshot: " + snapshotPath + " (blocks=" + snap.blocks.size()
+                    + ", biomes=" + snap.biomes.size() + ", fingerprint=" + fp + ")");
+        }
+        File regionDir = new File(world, "region");
+        if (!regionDir.isDirectory()) {
+            System.out.println("无 region 目录: " + regionDir);
+            return;
+        }
+        java.util.Map<String, Long> modCount = new java.util.TreeMap<String, Long>();
+        java.util.Map<Integer, Long> unknownIds = new java.util.TreeMap<Integer, Long>();
+        long total = 0;
+        int chunks = 0;
+        for (File rf : regionDir.listFiles()) {
+            if (!rf.getName().toLowerCase().endsWith(".mca")) continue;
+            RegionReader rr = new RegionReader(rf);
+            for (int idx : rr.listChunkIndices()) {
+                byte[] data = rr.readChunkData(idx);
+                if (data == null) continue;
+                chunks++;
+                NbtNode root = RegionWriter.unpackChunk(data);
+                NbtNode level = root.get("Level");
+                if (level == null) continue;
+                for (NbtNode sec : SectionCodec.sectionsOf(level)) {
+                    int[] stateIds = SectionCodec.decode(sec);
+                    if (stateIds == null) continue;
+                    for (int s : stateIds) {
+                        total++;
+                        int id = s >> 4;
+                        String name = snap != null ? snap.lookupBlockName(id) : null;
+                        if (name == null) {
+                            Long c = unknownIds.get(id);
+                            unknownIds.put(id, c == null ? 1 : c + 1);
+                            continue;
+                        }
+                        int colon = name.indexOf(':');
+                        String modid = colon > 0 ? name.substring(0, colon) : "?";
+                        Long c = modCount.get(modid);
+                        modCount.put(modid, c == null ? 1 : c + 1);
+                    }
+                }
+            }
+        }
+        System.out.println("chunks=" + chunks + ", blocks=" + total);
+        List<java.util.Map.Entry<String, Long>> sorted = new ArrayList<java.util.Map.Entry<String, Long>>(modCount.entrySet());
+        java.util.Collections.sort(sorted, new java.util.Comparator<java.util.Map.Entry<String, Long>>() {
+            public int compare(java.util.Map.Entry<String, Long> a, java.util.Map.Entry<String, Long> b) {
+                return b.getValue().compareTo(a.getValue());
+            }
+        });
+        System.out.println("--- 方块按 modid 分桶 (top 20) ---");
+        for (int i = 0; i < Math.min(20, sorted.size()); i++) {
+            java.util.Map.Entry<String, Long> e = sorted.get(i);
+            System.out.println("  " + e.getKey() + ": " + e.getValue()
+                    + " (" + String.format("%.2f", 100.0 * e.getValue() / Math.max(1, total)) + "%)");
+        }
+        long unknownTotal = 0;
+        for (long v : unknownIds.values()) unknownTotal += v;
+        System.out.println("--- 未知 ID（快照未覆盖，模组集可能不一致）: " + unknownTotal + " 方块 / " + unknownIds.size() + " 种 ---");
+        if (!unknownIds.isEmpty()) {
+            List<java.util.Map.Entry<Integer, Long>> us = new ArrayList<java.util.Map.Entry<Integer, Long>>(unknownIds.entrySet());
+            java.util.Collections.sort(us, new java.util.Comparator<java.util.Map.Entry<Integer, Long>>() {
+                public int compare(java.util.Map.Entry<Integer, Long> a, java.util.Map.Entry<Integer, Long> b) {
+                    return b.getValue().compareTo(a.getValue());
+                }
+            });
+            for (int i = 0; i < Math.min(8, us.size()); i++) {
+                java.util.Map.Entry<Integer, Long> e = us.get(i);
+                System.out.println("  unknown id=" + e.getKey() + " x" + e.getValue());
+            }
+        } else {
+            System.out.println("  (无未知 ID：快照完整覆盖本存档)");
+        }
     }
 
     // ------------------------------------------------------------ helpers
