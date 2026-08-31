@@ -1,9 +1,12 @@
 package com.chunkops;
 
+import net.minecraftforge.fml.common.Loader;
 import net.minecraftforge.fml.common.Mod;
 import net.minecraftforge.fml.common.event.FMLInitializationEvent;
 import net.minecraftforge.fml.common.event.FMLPreInitializationEvent;
 import org.apache.logging.log4j.Logger;
+
+import java.io.File;
 
 /**
  * ChunkOps112 - 1.12.2 模组兼容区块编辑器（阶段 0 骨架）
@@ -26,5 +29,12 @@ public class ChunkOpsMod {
     @Mod.EventHandler
     public void init(FMLInitializationEvent event) {
         logger.info("ChunkOps init");
+        // 导出注册表快照（阶段 1）：输出到 .minecraft/registry-snapshot.json
+        try {
+            File mcDir = Loader.instance().getConfigDir().getParentFile();
+            ChunkOpsExport.export(mcDir);
+        } catch (Exception e) {
+            logger.error("registry-snapshot 导出失败", e);
+        }
     }
 }
