@@ -183,7 +183,7 @@ public class ChunkMapRenderer {
             for (int z = 0; z < 16; z++) {
                 for (int x = 0; x < 16; x++) {
                     int col = z * 16 + x;
-                    int y = heightMap != null ? heightMap[col] : scanHeight(secStates, col);
+                    int y = findSurfaceY(secStates, heightMap, col);
                     int stateId = 0;
                     if (y >= 0) {
                         int[] ids = secStates.get(y >> 4);
@@ -205,7 +205,23 @@ public class ChunkMapRenderer {
         }
     }
 
-    /** 无 HeightMap 时从 y=255 向下扫描地表。 */
+    /**
+     * 地表 y 定位。
+     * 实测（HeightMapCheck）：1.12.2 旧式 HeightMap 存「最高方块 y + 1」（= 第一个空气的 y），
+     * 且个别列可能过期未更新。策略：从 heightMap-1 向下扫描最多 5 格；失败则从 y=255 全扫。
+     */
+    static int findSurfaceY(Map<Integer, int[]> secStates, int[] heightMap, int col) {
+        if (heightMap != null) {
+            int start = Math.max(0, heightMap[col] - 1);
+            for (int yy = start; yy >= Math.max(0, start - 5); yy--) {
+                int[] ids = secStates.get(yy >> 4);
+                if (ids != null && ids[((yy & 15) << 8) | col] != 0) return yy;
+            }
+        }
+        return scanHeight(secStates, col);
+    }
+
+    /** 无 HeightMap 或扫描失败时从 y=255 向下全扫。 */
     static int scanHeight(Map<Integer, int[]> secStates, int col) {
         for (int secY = 15; secY >= 0; secY--) {
             int[] ids = secStates.get(secY);
