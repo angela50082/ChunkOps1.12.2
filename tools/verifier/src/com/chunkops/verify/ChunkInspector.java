@@ -290,6 +290,7 @@ public class ChunkInspector {
         int chunksWithLegacyBlocks = 0, chunksWithLegacyData = 0, chunksWithLegacyAdd = 0;
         int sectionsTotal = 0, sectionsWithLegacy = 0;
         int emptyChunks = 0, corruptChunks = 0;
+        int sectionsAllAir = 0, sectionsWithBlocks = 0;
         boolean firstDumped = false;
         int chunksWithHeightmaps = 0, chunksWithBiomes = 0;
         int maxStateId = 0;
@@ -340,6 +341,15 @@ public class ChunkInspector {
                 for (NbtNode sec : sections.asList()) {
                     sectionsTotal++;
                     SectionInfo si = parseSection(sec);
+                    if (si.hasLegacyBlocks) {
+                        sectionsWithBlocks++;
+                        byte[] blk = (byte[]) sec.get("Blocks").value;
+                        boolean allAir = true;
+                        for (int j = 0; j < blk.length; j++) {
+                            if (blk[j] != 0) { allAir = false; break; }
+                        }
+                        if (allAir) sectionsAllAir++;
+                    }
                     if (si.hasLegacyBlocks) hasLegacyBlocks = true;
                     if (si.hasLegacyData) hasLegacyData = true;
                     if (si.hasLegacyAdd) hasLegacyAdd = true;
@@ -379,6 +389,10 @@ public class ChunkInspector {
         System.out.println("DataVersion histogram: " + dataVersions);
         System.out.println("compression types (1=gzip 2=zlib 3=none): " + compressionTypes);
         System.out.println("sections total: " + sectionsTotal);
+        System.out.println("sections with Blocks array: " + sectionsWithBlocks
+                + " | all-air sections: " + sectionsAllAir
+                + " (" + (sectionsWithBlocks > 0 ? String.format("%.1f", 100.0 * sectionsAllAir / sectionsWithBlocks) : "0") + "% of non-empty)");
+        System.out.println("  ^ 高比例 all-air = 区块曾被「清空」工具处理（如 MCA Selector delete/clear）");
         System.out.println("palette entry types: " + paletteEntryTypes);
         System.out.println("bits/block histogram: " + bitsHistogram);
         System.out.println("chunks containing legacy Blocks: " + chunksWithLegacyBlocks
