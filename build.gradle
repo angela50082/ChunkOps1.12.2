@@ -1,0 +1,53 @@
+// ChunkOps112 - 1.12.2 模组兼容区块编辑器
+// 构建脚本（ForgeGradle 2.3 / Gradle 4.9 / JDK 8）
+//
+// 若网络受限（国内环境），将下列 maven 地址替换为 BMCLAPI 镜像：
+//   https://maven.minecraftforge.net/  ->  https://bmclapi2.bangbang93.com/maven/
+//   mavenCentral() 保持不变（或用阿里云镜像 https://maven.aliyun.com/repository/public）
+
+buildscript {
+    repositories {
+        maven { url = 'https://maven.minecraftforge.net/' }
+        mavenCentral()
+    }
+    dependencies {
+        classpath 'net.minecraftforge.gradle:ForgeGradle:2.3-SNAPSHOT'
+    }
+}
+
+apply plugin: 'net.minecraftforge.gradle.forge'
+
+version = '0.1.0'
+group = 'com.chunkops'
+archivesBaseName = 'chunkops'
+
+sourceCompatibility = targetCompatibility = '1.8'
+compileJava.options.encoding = 'UTF-8'
+
+minecraft {
+    version = '1.12.2-14.23.5.2860'
+    runDir = 'run'
+    mappings = 'stable_39'
+    makeObfSourceJar = false
+}
+
+repositories {
+    // 依赖仓库（暂无外部依赖）
+}
+
+dependencies {
+}
+
+processResources {
+    inputs.property 'version', project.version
+    from(sourceSets.main.resources.srcDirs) {
+        include 'mcmod.info'
+        expand 'version': project.version
+    }
+}
+
+jar {
+    manifest {
+        attributes 'FMLCorePluginContainsFMLMod': 'false'
+    }
+}
