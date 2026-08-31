@@ -15,11 +15,13 @@ ChunkOps112/
 └── build-verifier.bat       # 验证工具一键编译
 ```
 
-## 开发环境（阶段 0 已验证）
+## 开发环境（阶段 0 已验证 ✅）
 
-- JDK 8：`C:\Gradle\jdk8`（1.8.0_202）✅；系统 JAVA_HOME 已失效，构建前显式设置
-- Gradle 4.9：`C:\Gradle\gradle-4.9` ✅；`GRADLE_USER_HOME` 需指向可写目录（本项目用 `.gradle-home`，否则报 native-platform.dll 加载失败）
-- 网络：待恢复（ForgeGradle 依赖下载）；恢复后按 `docs/阶段1-环境准备指南.md` 构建
+- JDK 8：`C:\Gradle\jdk8`（1.8.0_202）✅
+- Gradle 4.9：`C:\Gradle\gradle-4.9` ✅（`GRADLE_USER_HOME` 用 `.gradle-home`）
+- **构建已跑通**：`gradle build` → `build/libs/chunkops-0.1.0.jar` ✅
+- **坑**：forge 必须用 `1.12.2-14.23.5.2847`（2854/2860 无 userdev jar，FG2.3 extractUserdev 404）
+- 开发客户端：`gradle runClient`（需图形环境）
 
 ## 验证工具用法
 
