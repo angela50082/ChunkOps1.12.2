@@ -56,6 +56,57 @@ public class GuiOps {
     }
 
     /**
+     * 复制选区：读取 chunk 原始 payload 到内存剪贴板（同模组集原样）。
+     */
+    public static java.util.Map<Long, byte[]> copyArea(File worldDir, int minCx, int maxCx, int minCz, int maxCz) {
+        java.util.Map<Long, byte[]> clipboard = new java.util.HashMap<Long, byte[]>();
+        try {
+            for (int cx = minCx; cx <= maxCx; cx++) {
+                for (int cz = minCz; cz <= maxCz; cz++) {
+                    int rx = Math.floorDiv(cx, 32);
+                    int rz = Math.floorDiv(cz, 32);
+                    File region = new File(new File(worldDir, "region"), "r." + rx + "." + rz + ".mca");
+                    if (!region.isFile()) continue;
+                    RegionReader rr = new RegionReader(region);
+                    byte[] payload = rr.readChunkData((cz & 31) * 32 + (cx & 31));
+                    if (payload != null) {
+                        clipboard.put(((long) cx << 32) | (cz & 0xFFFFFFFFL), payload);
+                    }
+                }
+            }
+        } catch (Exception e) {
+            return null;
+        }
+        return clipboard;
+    }
+
+    /** 粘贴：把剪贴板 chunk 写回目标世界（同坐标，自动备份）。返回日志文本。 */
+    public static String pasteArea(File worldDir, java.util.Map<Long, byte[]> clipboard) {
+        if (clipboard == null || clipboard.isEmpty()) return "剪贴板为空";
+        int n = 0;
+        for (java.util.Map.Entry<Long, byte[]> e : clipboard.entrySet()) {
+            long key = e.getKey();
+            int cx = (int) (key >> 32);
+            int cz = (int) (key & 0xFFFFFFFFL);
+            try {
+                int rx = Math.floorDiv(cx, 32);
+                int rz = Math.floorDiv(cz, 32);
+                File region = new File(new File(worldDir, "region"), "r." + rx + "." + rz + ".mca");
+                if (!region.getParentFile().isDirectory()) return "目标缺少 region 目录";
+                com.chunkops.core.RegionWriter rw = new com.chunkops.core.RegionWriter(region);
+                rw.setChunk((cz & 31) * 32 + (cx & 31), e.getValue());
+                rw.write();
+                n++;
+            } catch (Exception ex) {
+                return "粘贴失败 (" + cx + "," + cz + "): " + ex.getMessage();
+            }
+        }
+        return "粘贴完成: " + n + " 个区块";
+    }
+
+    // ------------------------------------------------------------ stats
+
+    /**
      * 选区统计：解码方块 → 活注册表名称化 → 按 modid 分桶。
      * 返回多行文本（总数 + top 12 modid + 未知 id 数）。
      */

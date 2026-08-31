@@ -50,6 +50,12 @@ public class ChunkOpsEditorScreen extends GuiScreen {
     private static final int BTN_MENU_TRIM = 102;
     private static final int BTN_MENU_STATS = 103;
     private static final int BTN_MENU_CLOSE = 104;
+    private static final int BTN_MENU_COPY = 105;
+    private static final int BTN_MENU_PASTE = 106;
+    private static final int BTN_READONLY = 4;
+
+    private boolean readOnly = false;
+    private java.util.Map<Long, byte[]> clipboard = null;
 
     private void logLine(String s) {
         log.add(s);
@@ -72,12 +78,16 @@ public class ChunkOpsEditorScreen extends GuiScreen {
         closeMenu();
         menuOpen = true;
         int bx = Math.max(10, Math.min(this.width - 90, mx));
-        int by = Math.max(34, Math.min(this.height - 140, my));
+        int by = Math.max(34, Math.min(this.height - 160, my));
         this.buttonList.add(new GuiButton(BTN_MENU_REMOVE, bx, by, 80, 18, "移除区块"));
         this.buttonList.add(new GuiButton(BTN_MENU_CLEAR, bx, by + 20, 80, 18, "清空区块"));
         this.buttonList.add(new GuiButton(BTN_MENU_TRIM, bx, by + 40, 80, 18, "剪裁(保留选区)"));
         this.buttonList.add(new GuiButton(BTN_MENU_STATS, bx, by + 60, 80, 18, "统计选区"));
-        this.buttonList.add(new GuiButton(BTN_MENU_CLOSE, bx, by + 80, 80, 18, "关闭"));
+        this.buttonList.add(new GuiButton(BTN_MENU_COPY, bx, by + 80, 80, 18, "复制选区"));
+        if (clipboard != null && !clipboard.isEmpty()) {
+            this.buttonList.add(new GuiButton(BTN_MENU_PASTE, bx, by + 100, 80, 18, "粘贴(" + clipboard.size() + ")"));
+        }
+        this.buttonList.add(new GuiButton(BTN_MENU_CLOSE, bx, by + 120, 80, 18, "关闭"));
     }
 
     private void closeMenu() {
@@ -122,6 +132,7 @@ public class ChunkOpsEditorScreen extends GuiScreen {
         this.buttonList.add(new GuiButton(BTN_PREV, 6, y, 24, 20, "<"));
         this.buttonList.add(new GuiButton(BTN_NEXT, 34, y, 24, 20, ">"));
         this.buttonList.add(new GuiButton(BTN_BACK, this.width - 86, y, 80, 20, "返回主菜单"));
+        this.buttonList.add(new GuiButton(BTN_READONLY, this.width - 170, y, 80, 20, "只读: 关"));
     }
 
     @Override
@@ -249,6 +260,10 @@ public class ChunkOpsEditorScreen extends GuiScreen {
         } else if (button.id == BTN_BACK) {
             closeMenu();
             ChunkOpsGuiHandler.backToMainMenu();
+        } else if (button.id == BTN_READONLY) {
+            readOnly = !readOnly;
+            button.displayString = readOnly ? "只读: 开" : "只读: 关";
+            logLine(readOnly ? "已开启只读模式（不写入存档）" : "已关闭只读模式");
         } else if (button.id == BTN_MENU_REMOVE) {
             runSelectionOp("remove");
         } else if (button.id == BTN_MENU_CLEAR) {
@@ -257,40 +272,49 @@ public class ChunkOpsEditorScreen extends GuiScreen {
             runSelectionOp("trim");
         } else if (button.id == BTN_MENU_STATS) {
             runSelectionOp("stats");
+        } else if (button.id == BTN_MENU_COPY) {
+            runSelectionOp("copy");
+        } else if (button.id == BTN_MENU_PASTE) {
+            runSelectionOp("paste");
         } else if (button.id == BTN_MENU_CLOSE) {
             closeMenu();
         }
     }
 
-    /** 执行选区操作（含 session.lock 检查）。 */
+    /** 执行选区操作（含 session.lock 与只读检查）。 */
     private void runSelectionOp(String op) {
         closeMenu();
         if (currentWorldDir == null) {
             logLine("未选择存档");
             return;
         }
-        if (GuiOps.hasSessionLock(currentWorldDir)) {
+        boolean writeOp = !op.equals("stats") && !op.equals("copy");
+        if (readOnly && writeOp) {
+            logLine("[只读] 操作未执行");
+            return;
+        }
+        if (writeOp && GuiOps.hasSessionLock(currentWorldDir)) {
             logLine("[警告] 检测到 session.lock——该存档可能被游戏实例占用，继续操作可能损坏！");
         }
-        if (selMinCx == -1) {
+        if (selMinCx == -1 && !op.equals("paste")) {
             logLine("请先框选区块（左键拖动）");
             return;
         }
-        int w = selMaxCx - selMinCx + 1;
-        int h = selMaxCz - selMinCz + 1;
-        logLine("选区 [" + selMinCx + ".." + selMaxCx + ", " + selMinCz + ".." + selMaxCz + "] " + w + "x" + h + " 区块");
+        if (!op.equals("paste")) {
+            int w = selMaxCx - selMinCx + 1;
+            int h = selMaxCz - selMinCz + 1;
+            logLine("选区 [" + selMinCx + ".." + selMaxCx + ", " + selMinCz + ".." + selMaxCz + "] " + w + "x" + h + " 区块");
+        }
         if (op.equals("remove")) {
             for (int cx = selMinCx; cx <= selMaxCx; cx++) {
                 for (int cz = selMinCz; cz <= selMaxCz; cz++) {
-                    String r = GuiOps.removeChunk(currentWorldDir, cx, cz, false);
-                    logLine(r);
+                    logLine(GuiOps.removeChunk(currentWorldDir, cx, cz, false));
                 }
             }
         } else if (op.equals("clear")) {
             for (int cx = selMinCx; cx <= selMaxCx; cx++) {
                 for (int cz = selMinCz; cz <= selMaxCz; cz++) {
-                    String r = GuiOps.clearChunk(currentWorldDir, cx, cz, false);
-                    logLine(r);
+                    logLine(GuiOps.clearChunk(currentWorldDir, cx, cz, false));
                 }
             }
         } else if (op.equals("trim")) {
@@ -298,9 +322,12 @@ public class ChunkOpsEditorScreen extends GuiScreen {
         } else if (op.equals("stats")) {
             String s = GuiOps.statsArea(currentWorldDir, selMinCx, selMaxCx, selMinCz, selMaxCz);
             for (String line : s.split("\n")) logLine(line);
+        } else if (op.equals("copy")) {
+            clipboard = GuiOps.copyArea(currentWorldDir, selMinCx, selMaxCx, selMinCz, selMaxCz);
+            logLine(clipboard != null ? "已复制 " + clipboard.size() + " 个区块到剪贴板" : "复制失败");
+        } else if (op.equals("paste")) {
+            logLine(GuiOps.pasteArea(currentWorldDir, clipboard));
         }
-        // 操作后清除区块缓存，强制重新加载
-        // （renderer 的 tiles/textures 由 LRU 管理；移除的 chunk 重新加载后为空——texture 缓存保留旧图，可接受）
     }
 
     @Override
