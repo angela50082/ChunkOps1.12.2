@@ -37,6 +37,16 @@ repositories {
     // 依赖仓库（暂无外部依赖）
 }
 
+// 把 chunkops-core / verify 工具链编入模组（阶段 3 GUI 直接复用文件模式数据层）
+sourceSets {
+    main {
+        java {
+            srcDir 'src/main/java'
+            srcDir 'tools/verifier/src'
+        }
+    }
+}
+
 dependencies {
 }
 
