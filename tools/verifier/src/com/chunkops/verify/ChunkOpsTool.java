@@ -33,12 +33,16 @@ public class ChunkOpsTool {
         List<String> a = new ArrayList<String>();
         boolean dryRun = false;
         boolean move = false;
+        boolean abortOnMissing = false;
+        boolean keepRaw = false;
         String snapshotPath = null;
         String srcSnapshotPath = null;
         for (int i = 0; i < args.length; i++) {
             String s = args[i];
             if (s.equals("--dry-run")) dryRun = true;
             else if (s.equals("--move")) move = true;
+            else if (s.equals("--abort")) abortOnMissing = true;
+            else if (s.equals("--keep-raw")) keepRaw = true;
             else if (s.equals("--snapshot") && i + 1 < args.length) snapshotPath = args[++i];
             else if (s.equals("--snapshot-src") && i + 1 < args.length) srcSnapshotPath = args[++i];
             else a.add(s);
@@ -81,7 +85,7 @@ public class ChunkOpsTool {
             File dst = new File(a.get(2));
             int x1 = Integer.parseInt(a.get(3)), z1 = Integer.parseInt(a.get(4));
             int x2 = Integer.parseInt(a.get(5)), z2 = Integer.parseInt(a.get(6));
-            opCopyMove(src, dst, x1, z1, x2, z2, move, dryRun, snapshotPath, srcSnapshotPath);
+            opCopyMove(src, dst, x1, z1, x2, z2, move, dryRun, snapshotPath, srcSnapshotPath, abortOnMissing, keepRaw);
             return;
         }
         if (cmd.equals("mcops-export")) {
@@ -195,7 +199,8 @@ public class ChunkOpsTool {
     // ------------------------------------------------------------ copy/move
 
     static void opCopyMove(File srcWorld, File dstWorld, int x1, int z1, int x2, int z2,
-                           boolean move, boolean dryRun, String dstSnapshotPath, String srcSnapshotPath) throws IOException {
+                           boolean move, boolean dryRun, String dstSnapshotPath, String srcSnapshotPath,
+                           boolean abortOnMissing, boolean keepRaw) throws IOException {
         RegistrySnapshot srcSnap = null;
         RegistrySnapshot dstSnap = null;
         if (srcSnapshotPath != null || dstSnapshotPath != null) {
@@ -233,10 +238,13 @@ public class ChunkOpsTool {
                     // 跨模组集：重映射管线
                     NbtNode root = RegionWriter.unpackChunk(payload);
                     RemapEngine.ConflictReport report = new RemapEngine.ConflictReport();
-                    root = RemapEngine.remapChunk(root, srcSnap, dstSnap, new RemapEngine.Options(), report);
+                    RemapEngine.Options options = new RemapEngine.Options();
+                    options.abortOnMissing = abortOnMissing;
+                    options.keepRawIds = keepRaw;
+                    root = RemapEngine.remapChunk(root, srcSnap, dstSnap, options, report);
                     missingTotal += report.missingBlocks.size();
                     if (report.aborted) {
-                        System.out.println("chunk (" + cx + "," + cz + ") 中止（缺失方块）");
+                        System.out.println("chunk (" + cx + "," + cz + ") 中止（缺失方块，--abort）");
                         continue;
                     }
                     if (!report.missingBlocks.isEmpty()) {
