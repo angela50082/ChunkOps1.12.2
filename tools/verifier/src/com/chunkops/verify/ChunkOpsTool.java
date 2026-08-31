@@ -1,5 +1,6 @@
 package com.chunkops.verify;
 
+import com.chunkops.core.Mcops;
 import com.chunkops.core.RegionWriter;
 import com.chunkops.core.RegistrySnapshot;
 import com.chunkops.core.RemapEngine;
@@ -81,6 +82,21 @@ public class ChunkOpsTool {
             int x1 = Integer.parseInt(a.get(3)), z1 = Integer.parseInt(a.get(4));
             int x2 = Integer.parseInt(a.get(5)), z2 = Integer.parseInt(a.get(6));
             opCopyMove(src, dst, x1, z1, x2, z2, move, dryRun, snapshotPath, srcSnapshotPath);
+            return;
+        }
+        if (cmd.equals("mcops-export")) {
+            // mcops-export <world> <x1> <z1> <x2> <z2> <out.mcops> --snapshot <snap>
+            require(a, 7);
+            opMcopsExport(new File(a.get(1)),
+                    Integer.parseInt(a.get(2)), Integer.parseInt(a.get(3)),
+                    Integer.parseInt(a.get(4)), Integer.parseInt(a.get(5)),
+                    new File(a.get(6)), snapshotPath);
+            return;
+        }
+        if (cmd.equals("mcops-import")) {
+            // mcops-import <world> <file.mcops> --snapshot <snap> [--dry-run]
+            require(a, 3);
+            opMcopsImport(new File(a.get(1)), new File(a.get(2)), snapshotPath, dryRun);
             return;
         }
         System.out.println("未知命令: " + cmd);
@@ -327,6 +343,75 @@ public class ChunkOpsTool {
             }
         } else {
             System.out.println("  (无未知 ID：快照完整覆盖本存档)");
+        }
+    }
+
+    // ------------------------------------------------------------ mcops
+
+    /** 导出选区为 .mcops 名称化剪贴板文件。 */
+    static void opMcopsExport(File world, int x1, int z1, int x2, int z2, File outFile, String snapshotPath) throws IOException {
+        if (snapshotPath == null) {
+            System.out.println("mcops-export 需要 --snapshot <registry-snapshot.json>（名称化用）");
+            return;
+        }
+        RegistrySnapshot snap = RegistrySnapshot.load(new File(snapshotPath));
+        int minCx = Math.floorDiv(Math.min(x1, x2), 16);
+        int maxCx = Math.floorDiv(Math.max(x1, x2), 16);
+        int minCz = Math.floorDiv(Math.min(z1, z2), 16);
+        int maxCz = Math.floorDiv(Math.max(z1, z2), 16);
+        List<NbtNode> chunks = new ArrayList<NbtNode>();
+        for (int cx = minCx; cx <= maxCx; cx++) {
+            for (int cz = minCz; cz <= maxCz; cz++) {
+                File regionFile = regionOf(world, cx, cz);
+                if (!regionFile.isFile()) continue;
+                RegionReader rr = new RegionReader(regionFile);
+                byte[] payload = rr.readChunkData(indexOf(cx, cz));
+                if (payload == null) continue;
+                chunks.add(RegionWriter.unpackChunk(payload));
+            }
+        }
+        byte[] data = Mcops.exportChunks(chunks, snap, snap.fingerprint, "ChunkOps112 export " + world.getName());
+        if (outFile.getParentFile() != null) outFile.getParentFile().mkdirs();
+        java.nio.file.Files.write(outFile.toPath(), data);
+        System.out.println("mcops-export: " + chunks.size() + " chunks -> " + outFile.getAbsolutePath()
+                + " (" + data.length + " bytes)");
+    }
+
+    /** 导入 .mcops 到目标世界（经目标快照重映射）。 */
+    static void opMcopsImport(File world, File mcopsFile, String snapshotPath, boolean dryRun) throws IOException {
+        if (snapshotPath == null) {
+            System.out.println("mcops-import 需要 --snapshot <registry-snapshot.json>（重映射用）");
+            return;
+        }
+        RegistrySnapshot snap = RegistrySnapshot.load(new File(snapshotPath));
+        byte[] data = java.nio.file.Files.readAllBytes(mcopsFile.toPath());
+        Mcops.ImportReport report = new Mcops.ImportReport();
+        List<NbtNode> chunks = Mcops.importChunks(data, snap, report);
+        System.out.println("mcops-import: " + mcopsFile.getName() + " -> " + world.getName() + " | " + report.summary());
+        for (NbtNode chunkRoot : chunks) {
+            NbtNode level = chunkRoot.get("Level");
+            int cx = 0, cz = 0;
+            if (level != null) {
+                NbtNode xp = level.get("xPos");
+                NbtNode zp = level.get("zPos");
+                if (xp != null) cx = ((Number) xp.value).intValue();
+                if (zp != null) cz = ((Number) zp.value).intValue();
+            }
+            File regionFile = regionOf(world, cx, cz);
+            if (!regionFile.getParentFile().isDirectory()) {
+                System.out.println("目标世界缺少 region 目录: " + regionFile.getParentFile());
+                return;
+            }
+            System.out.println("  -> chunk (" + cx + "," + cz + ") " + regionFile.getName() + (dryRun ? " [DRY-RUN]" : ""));
+            if (!dryRun) {
+                RegionWriter rw = new RegionWriter(regionFile);
+                rw.setChunk(indexOf(cx, cz), RegionWriter.packChunk(chunkRoot));
+                File bak = rw.write();
+                if (bak != null) System.out.println("    备份: " + bak.getName());
+            }
+        }
+        if (!report.missingPalette.isEmpty()) {
+            System.out.println("缺失方块（已回退 air）: " + report.missingPalette);
         }
     }
 
