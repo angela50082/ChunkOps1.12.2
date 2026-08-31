@@ -11,8 +11,12 @@ import java.util.Map;
  */
 public class Json {
 
-    /** 解析 JSON 文本 → Map/List/String/Double/Long/Boolean/null。 */
+    /**
+     * 解析 JSON 文本 → Map/List/String/Double/Long/Boolean/null。
+     * 兼容 mcmod.info 常见的行注释（双斜杠）与块注释。
+     */
     public static Object parse(String text) {
+        if (!text.isEmpty() && text.charAt(0) == '\uFEFF') text = text.substring(1); // BOM
         Parser p = new Parser(text);
         Object v = p.parseValue();
         p.skipWs();
@@ -112,7 +116,27 @@ public class Json {
         }
 
         void skipWs() {
-            while (i < s.length() && Character.isWhitespace(s.charAt(i))) i++;
+            while (i < s.length()) {
+                char c = s.charAt(i);
+                if (Character.isWhitespace(c)) {
+                    i++;
+                    continue;
+                }
+                if (c == '/' && i + 1 < s.length()) {
+                    char n = s.charAt(i + 1);
+                    if (n == '/') { // 行注释
+                        while (i < s.length() && s.charAt(i) != '\n') i++;
+                        continue;
+                    }
+                    if (n == '*') { // 块注释
+                        i += 2;
+                        while (i + 1 < s.length() && !(s.charAt(i) == '*' && s.charAt(i + 1) == '/')) i++;
+                        i += 2;
+                        continue;
+                    }
+                }
+                break;
+            }
         }
 
         Object parseValue() {
