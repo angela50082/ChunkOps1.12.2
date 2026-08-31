@@ -22,6 +22,7 @@ import java.util.Map;
 public class MapColorCache {
 
     private final Map<Integer, Integer> cache = new ConcurrentHashMap<Integer, Integer>();
+    private int fallbackCount = 0;
 
     public int colorFor(int stateId) {
         Integer c = cache.get(stateId);
@@ -44,8 +45,23 @@ public class MapColorCache {
             if (quads.isEmpty()) return 0xFF888888;
             TextureAtlasSprite sprite = quads.get(0).getSprite();
             if (sprite == null) return 0xFF888888;
+            // 关键：使用 atlas 中已注册的 sprite（quad 上的 sprite 对象可能无帧数据）
+            try {
+                TextureAtlasSprite registered = Minecraft.getMinecraft().getTextureMapBlocks()
+                        .getAtlasSprite(sprite.getIconName());
+                if (registered != null) sprite = registered;
+            } catch (Exception ignored) {
+                // 保持原 sprite
+            }
             int argb = sampleCenter(sprite);
-            return argb != 0 ? argb : 0xFF888888;
+            if (argb == 0) {
+                if (fallbackCount < 10) {
+                    System.out.println("[ChunkOps] 取色失败 stateId=" + stateId);
+                }
+                fallbackCount++;
+                return 0xFF888888;
+            }
+            return argb;
         } catch (Exception e) {
             return 0xFF888888;
         }
@@ -60,17 +76,18 @@ public class MapColorCache {
         if (frame == null) return 0;
         int cx = w / 2;
         int cy = h / 2;
-        // 布局 A：frame[0] = mipmap0 一维像素数组 int[width*height]
-        if (frame.length > 0 && frame[0] != null) {
-            int[] mip0 = frame[0];
-            if (mip0.length >= w * h) return mip0[cy * w + cx];
-            if (mip0.length >= w) return mip0[cx]; // 布局 B：一行
+        // 找最长的一行（布局：int[mipmap][width*height] 一维，或 int[height][width] 二维）
+        int[] best = null;
+        for (int[] row : frame) {
+            if (row != null && (best == null || row.length > best.length)) best = row;
         }
-        // 布局 C：frame[y] = 行数组
+        if (best == null) return 0;
+        if (best.length >= w * h) return best[cy * w + cx];        // 一维 mipmap0
         if (frame.length > cy && frame[cy] != null && frame[cy].length > cx) {
-            return frame[cy][cx];
+            return frame[cy][cx];                                   // 二维 [y][x]
         }
-        return 0;
+        if (best.length >= w) return best[cx];                      // 退化：单行
+        return best[best.length / 2];
     }
 
     /** 颜色 × 高度明暗（y 越高越亮）。 */

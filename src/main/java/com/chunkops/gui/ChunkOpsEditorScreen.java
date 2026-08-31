@@ -95,7 +95,8 @@ public class ChunkOpsEditorScreen extends GuiScreen {
         java.util.Iterator<GuiButton> it = this.buttonList.iterator();
         while (it.hasNext()) {
             int id = it.next().id;
-            if (id >= BTN_MENU_REMOVE && id <= BTN_MENU_CLOSE) it.remove();
+            // 移除全部菜单按钮（含复制 105 / 粘贴 106）
+            if (id >= BTN_MENU_REMOVE && id <= BTN_MENU_PASTE) it.remove();
         }
     }
 
@@ -106,6 +107,7 @@ public class ChunkOpsEditorScreen extends GuiScreen {
         } else {
             currentWorldDir = null;
         }
+        renderer.clear(); // 关键：切换存档必须清空地图缓存（含进行中的异步任务），否则跨世界串图/闪烁
     }
 
     @Override
@@ -162,7 +164,8 @@ public class ChunkOpsEditorScreen extends GuiScreen {
                     int size = Math.max(1, (int) Math.round(16 * ppb));
                     ChunkMapRenderer.ChunkMapTile tile = renderer.getOrLoad(currentWorldDir, cx, cz);
                     if (tile != null) {
-                        ResourceLocation loc = renderer.textureFor(ChunkMapRenderer.key(cx, cz), tile,
+                        ResourceLocation loc = renderer.textureFor(
+                                ChunkMapRenderer.key(currentWorldDir.getAbsolutePath(), cx, cz), tile,
                                 this.mc.getTextureManager());
                         this.mc.getTextureManager().bindTexture(loc);
                         drawTexturedQuad(sx, sy, size, size);

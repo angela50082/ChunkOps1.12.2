@@ -35,17 +35,17 @@ public class ChunkMapRenderer {
 
     private final MapColorCache colors = new MapColorCache();
 
-    private final Map<Long, ChunkMapTile> tiles = new LinkedHashMap<Long, ChunkMapTile>(256, 0.75f, true) {
-        protected boolean removeEldestEntry(Map.Entry<Long, ChunkMapTile> eldest) {
+    private final Map<String, ChunkMapTile> tiles = new LinkedHashMap<String, ChunkMapTile>(256, 0.75f, true) {
+        protected boolean removeEldestEntry(Map.Entry<String, ChunkMapTile> eldest) {
             return size() > TILE_CACHE_MAX;
         }
     };
-    private final Map<Long, ResourceLocation> textures = new LinkedHashMap<Long, ResourceLocation>(256, 0.75f, true) {
-        protected boolean removeEldestEntry(Map.Entry<Long, ResourceLocation> eldest) {
+    private final Map<String, ResourceLocation> textures = new LinkedHashMap<String, ResourceLocation>(256, 0.75f, true) {
+        protected boolean removeEldestEntry(Map.Entry<String, ResourceLocation> eldest) {
             return size() > TEXTURE_CACHE_MAX;
         }
     };
-    private final Map<Long, Future<ChunkMapTile>> pending = new HashMap<Long, Future<ChunkMapTile>>();
+    private final Map<String, Future<ChunkMapTile>> pending = new HashMap<String, Future<ChunkMapTile>>();
 
     private final ExecutorService pool = Executors.newFixedThreadPool(2, new ThreadFactory() {
         public Thread newThread(Runnable r) {
@@ -60,8 +60,18 @@ public class ChunkMapRenderer {
         public final int[] colors = new int[256];
     }
 
-    static long key(int cx, int cz) {
-        return ((long) cx << 32) | (cz & 0xFFFFFFFFL);
+    static String key(String worldPath, int cx, int cz) {
+        return worldPath + "|" + cx + "," + cz;
+    }
+
+    /** 清空全部缓存（切换存档时调用，避免跨世界串图/闪烁）。 */
+    public void clear() {
+        synchronized (pending) {
+            for (Future<ChunkMapTile> f : pending.values()) f.cancel(true);
+            pending.clear();
+        }
+        tiles.clear();
+        textures.clear();
     }
 
     /**
@@ -69,16 +79,17 @@ public class ChunkMapRenderer {
      */
     public ChunkMapTile getOrLoad(File worldDir, int cx, int cz) {
         pump();
-        long k = key(cx, cz);
+        String k = key(worldDir.getAbsolutePath(), cx, cz);
         ChunkMapTile tile = tiles.get(k);
         if (tile != null) return tile;
         synchronized (pending) {
             if (!pending.containsKey(k)) {
+                final String fWorld = worldDir.getAbsolutePath();
                 final int fx = cx;
                 final int fz = cz;
                 pending.put(k, pool.submit(new java.util.concurrent.Callable<ChunkMapTile>() {
                     public ChunkMapTile call() {
-                        return loadTile(worldDir, fx, fz);
+                        return loadTile(new File(fWorld), fx, fz);
                     }
                 }));
             }
@@ -88,25 +99,25 @@ public class ChunkMapRenderer {
 
     /** 主线程调用：收割完成的任务。 */
     public void pump() {
-        synchronized (pending) {
-            Iterator<Map.Entry<Long, Future<ChunkMapTile>>> it = pending.entrySet().iterator();
-            while (it.hasNext()) {
-                Map.Entry<Long, Future<ChunkMapTile>> e = it.next();
-                if (e.getValue().isDone()) {
-                    try {
-                        ChunkMapTile t = e.getValue().get();
-                        if (t != null) tiles.put(e.getKey(), t);
-                    } catch (Exception ignored) {
-                        // 加载失败：不缓存
+            synchronized (pending) {
+                Iterator<Map.Entry<String, Future<ChunkMapTile>>> it = pending.entrySet().iterator();
+                while (it.hasNext()) {
+                    Map.Entry<String, Future<ChunkMapTile>> e = it.next();
+                    if (e.getValue().isDone()) {
+                        try {
+                            ChunkMapTile t = e.getValue().get();
+                            if (t != null) tiles.put(e.getKey(), t);
+                        } catch (Exception ignored) {
+                            // 加载失败：不缓存
+                        }
+                        it.remove();
                     }
-                    it.remove();
                 }
             }
-        }
     }
 
     /** 主线程调用：获取/创建 chunk 纹理（DynamicTexture 16×16，nearest 拉伸由 GL 决定）。 */
-    public ResourceLocation textureFor(long key, ChunkMapTile tile, TextureManager tm) {
+    public ResourceLocation textureFor(String key, ChunkMapTile tile, TextureManager tm) {
         ResourceLocation loc = textures.get(key);
         if (loc == null) {
             loc = new ResourceLocation("chunkops", "map/" + key);
