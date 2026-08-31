@@ -25,7 +25,9 @@ sourceCompatibility = targetCompatibility = '1.8'
 compileJava.options.encoding = 'UTF-8'
 
 minecraft {
-    version = '1.12.2-14.23.5.2860'
+    // 注意：1.12.2 用 14.23.5.2847（最后一个带 userdev jar 的构建）。
+    // 2854/2860 无 forge-userdev.jar，FG2.3 的 extractUserdev 任务会 404 失败。
+    version = '1.12.2-14.23.5.2847'
     runDir = 'run'
     mappings = 'stable_39'
     makeObfSourceJar = false
