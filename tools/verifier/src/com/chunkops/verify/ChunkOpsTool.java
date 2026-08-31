@@ -113,7 +113,7 @@ public class ChunkOpsTool {
     // ------------------------------------------------------------ clear
 
     /** 清空区块：删除全部 Sections 与 TileEntities（方块实体），保留区块结构与其他数据。 */
-    static void opClear(File world, int cx, int cz, boolean dryRun) throws IOException {
+    public static void opClear(File world, int cx, int cz, boolean dryRun) throws IOException {
         File regionFile = regionOf(world, cx, cz);
         int index = indexOf(cx, cz);
         RegionReader rr = new RegionReader(regionFile);
@@ -139,7 +139,7 @@ public class ChunkOpsTool {
 
     // ------------------------------------------------------------ remove
 
-    static void opRemove(File world, int cx, int cz, boolean dryRun) throws IOException {
+    public static void opRemove(File world, int cx, int cz, boolean dryRun) throws IOException {
         File regionFile = regionOf(world, cx, cz);
         int index = indexOf(cx, cz);
         RegionReader rr = new RegionReader(regionFile);
@@ -159,7 +159,7 @@ public class ChunkOpsTool {
     // ------------------------------------------------------------ trim
 
     /** 移除指定方块坐标矩形之外的所有区块（主世界）。 */
-    static void opTrim(File world, int x1, int z1, int x2, int z2, boolean dryRun) throws IOException {
+    public static void opTrim(File world, int x1, int z1, int x2, int z2, boolean dryRun) throws IOException {
         int minCx = Math.floorDiv(Math.min(x1, x2), 16);
         int maxCx = Math.floorDiv(Math.max(x1, x2), 16);
         int minCz = Math.floorDiv(Math.min(z1, z2), 16);
@@ -198,7 +198,7 @@ public class ChunkOpsTool {
 
     // ------------------------------------------------------------ copy/move
 
-    static void opCopyMove(File srcWorld, File dstWorld, int x1, int z1, int x2, int z2,
+    public static void opCopyMove(File srcWorld, File dstWorld, int x1, int z1, int x2, int z2,
                            boolean move, boolean dryRun, String dstSnapshotPath, String srcSnapshotPath,
                            boolean abortOnMissing, boolean keepRaw) throws IOException {
         RegistrySnapshot srcSnap = null;
@@ -274,7 +274,7 @@ public class ChunkOpsTool {
     // ------------------------------------------------------------ buckets
 
     /** 按模组分桶统计（P0 验收项）。加载 registry-snapshot.json 名称化后分桶；无快照时输出未知 ID 报告。 */
-    static void opBuckets(File world, String snapshotPath) throws IOException {
+    public static void opBuckets(File world, String snapshotPath) throws IOException {
         RegistrySnapshot snap = null;
         if (snapshotPath != null) {
             snap = RegistrySnapshot.load(new File(snapshotPath));
@@ -357,7 +357,7 @@ public class ChunkOpsTool {
     // ------------------------------------------------------------ mcops
 
     /** 导出选区为 .mcops 名称化剪贴板文件。 */
-    static void opMcopsExport(File world, int x1, int z1, int x2, int z2, File outFile, String snapshotPath) throws IOException {
+    public static void opMcopsExport(File world, int x1, int z1, int x2, int z2, File outFile, String snapshotPath) throws IOException {
         if (snapshotPath == null) {
             System.out.println("mcops-export 需要 --snapshot <registry-snapshot.json>（名称化用）");
             return;
@@ -386,7 +386,7 @@ public class ChunkOpsTool {
     }
 
     /** 导入 .mcops 到目标世界（经目标快照重映射）。 */
-    static void opMcopsImport(File world, File mcopsFile, String snapshotPath, boolean dryRun) throws IOException {
+    public static void opMcopsImport(File world, File mcopsFile, String snapshotPath, boolean dryRun) throws IOException {
         if (snapshotPath == null) {
             System.out.println("mcops-import 需要 --snapshot <registry-snapshot.json>（重映射用）");
             return;
