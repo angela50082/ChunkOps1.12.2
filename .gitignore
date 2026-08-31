@@ -16,6 +16,9 @@ Thumbs.db
 # 验证工具输出
 tools/verifier/out/
 
+# 测试数据（可随时重建）
+test-data/
+
 # 备份/临时
 *.mcabackup
 *.bak
