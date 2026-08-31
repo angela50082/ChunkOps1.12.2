@@ -161,7 +161,19 @@ public class ChunkInspector {
                     + (legacyHm.type == NbtNode.TAG_INT_ARRAY ? " len=" + ((int[]) legacyHm.value).length : ""));
         }
         NbtNode biomes = level.get("Biomes");
-        System.out.println("Biomes: " + (biomes != null ? ((byte[]) biomes.value).length + " bytes" : "ABSENT"));
+        if (biomes != null) {
+            String detail;
+            if (biomes.type == NbtNode.TAG_BYTE_ARRAY) {
+                detail = ((byte[]) biomes.value).length + " bytes (byte[])";
+            } else if (biomes.type == NbtNode.TAG_INT_ARRAY) {
+                detail = ((int[]) biomes.value).length + " ints (IntArray! non-standard, tool-rewritten world)";
+            } else {
+                detail = NbtNode.typeName(biomes.type);
+            }
+            System.out.println("Biomes: " + detail);
+        } else {
+            System.out.println("Biomes: ABSENT");
+        }
         NbtNode tes = level.get("TileEntities");
         if (tes != null) {
             System.out.println("TileEntities: " + tes.asList().size());
