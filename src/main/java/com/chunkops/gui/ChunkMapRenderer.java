@@ -28,8 +28,8 @@ import java.util.concurrent.ThreadFactory;
  */
 public class ChunkMapRenderer {
 
-    private static final int TILE_CACHE_MAX = 1024;
-    private static final int TEXTURE_CACHE_MAX = 1024;
+    private static final int TILE_CACHE_MAX = 16384;   // tile 数据缓存：大存档浏览不驱逐（16MB）
+    private static final int TEXTURE_CACHE_MAX = 2048;  // GL 纹理缓存：驱逐后重建很快，不闪烁
     private static final int BACKGROUND = 0xFF14181C;
     private static final int PENDING = 0xFF20262C;
 
@@ -47,7 +47,7 @@ public class ChunkMapRenderer {
     };
     private final Map<String, Future<ChunkMapTile>> pending = new HashMap<String, Future<ChunkMapTile>>();
 
-    private final ExecutorService pool = Executors.newFixedThreadPool(2, new ThreadFactory() {
+    private final ExecutorService pool = Executors.newFixedThreadPool(4, new ThreadFactory() {
         public Thread newThread(Runnable r) {
             Thread t = new Thread(r, "chunkops-map");
             t.setDaemon(true);
@@ -120,10 +120,18 @@ public class ChunkMapRenderer {
     public ResourceLocation textureFor(String key, ChunkMapTile tile, TextureManager tm) {
         ResourceLocation loc = textures.get(key);
         if (loc == null) {
-            loc = new ResourceLocation("chunkops", "map/" + key);
+            loc = new ResourceLocation("chunkops", "map/" + key.hashCode());
             DynamicTexture dt = new DynamicTexture(16, 16);
             int[] data = dt.getTextureData();
-            System.arraycopy(tile.colors, 0, data, 0, 256);
+            // 关键：1.12.2 DynamicTexture 像素为 ABGR（GL_RGBA 小端），ARGB 直接放入会红蓝交换
+            for (int i = 0; i < 256; i++) {
+                int c = tile.colors[i];
+                int a = c >>> 24;
+                int r = (c >> 16) & 0xFF;
+                int g = (c >> 8) & 0xFF;
+                int b = c & 0xFF;
+                data[i] = (a << 24) | (b << 16) | (g << 8) | r;
+            }
             dt.updateDynamicTexture();
             tm.loadTexture(loc, dt);
             textures.put(key, loc);
