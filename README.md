@@ -6,18 +6,20 @@
 
 ```
 ChunkOps112/
-├── docs/设计文档.md          # 设计方案（v0.2：主菜单 MCA 式编辑器）
+├── docs/设计文档.md          # 设计方案（v0.3：主菜单 MCA 式编辑器，格式实测修正）
+├── docs/阶段1-环境准备指南.md # 构建前置：JDK8/Gradle4.9 已就绪，网络恢复后执行
 ├── build.gradle             # ForgeGradle 2.3（需 JDK8 + Gradle 4.9）
 ├── src/main/java/com/chunkops/   # Forge 模组源码
 ├── tools/verifier/          # 阶段 0 纯 Java 格式验证工具（不依赖 Forge/网络）
-└── report/                  # 验证报告输出
+├── report/格式验证报告.md     # 阶段 0 实测报告（清单 1-9 全部完成）
+└── build-verifier.bat       # 验证工具一键编译
 ```
 
-## 开发环境要求（阶段 0）
+## 开发环境（阶段 0 已验证）
 
-- JDK 8（ForgeGradle 2.3 仅支持 JDK 8；注意 JAVA_HOME 必须指向 JDK 8，不能是新版 JDK）
-- Gradle 4.9（项目使用 wrapper 固定版本）
-- IntelliJ IDEA（可选，命令行构建亦可）
+- JDK 8：`C:\Gradle\jdk8`（1.8.0_202）✅；系统 JAVA_HOME 已失效，构建前显式设置
+- Gradle 4.9：`C:\Gradle\gradle-4.9` ✅；`GRADLE_USER_HOME` 需指向可写目录（本项目用 `.gradle-home`，否则报 native-platform.dll 加载失败）
+- 网络：待恢复（ForgeGradle 依赖下载）；恢复后按 `docs/阶段1-环境准备指南.md` 构建
 
 ## 验证工具用法
 
