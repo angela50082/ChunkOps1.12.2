@@ -2,6 +2,7 @@ package com.chunkops.verify;
 
 import com.chunkops.core.RegionWriter;
 import com.chunkops.core.RegistrySnapshot;
+import com.chunkops.core.RemapEngine;
 import com.chunkops.core.SectionCodec;
 
 import java.io.File;
@@ -32,11 +33,13 @@ public class ChunkOpsTool {
         boolean dryRun = false;
         boolean move = false;
         String snapshotPath = null;
+        String srcSnapshotPath = null;
         for (int i = 0; i < args.length; i++) {
             String s = args[i];
             if (s.equals("--dry-run")) dryRun = true;
             else if (s.equals("--move")) move = true;
             else if (s.equals("--snapshot") && i + 1 < args.length) snapshotPath = args[++i];
+            else if (s.equals("--snapshot-src") && i + 1 < args.length) srcSnapshotPath = args[++i];
             else a.add(s);
         }
         String cmd = a.get(0);
@@ -77,7 +80,7 @@ public class ChunkOpsTool {
             File dst = new File(a.get(2));
             int x1 = Integer.parseInt(a.get(3)), z1 = Integer.parseInt(a.get(4));
             int x2 = Integer.parseInt(a.get(5)), z2 = Integer.parseInt(a.get(6));
-            opCopyMove(src, dst, x1, z1, x2, z2, move, dryRun);
+            opCopyMove(src, dst, x1, z1, x2, z2, move, dryRun, snapshotPath, srcSnapshotPath);
             return;
         }
         System.out.println("未知命令: " + cmd);
@@ -175,12 +178,28 @@ public class ChunkOpsTool {
 
     // ------------------------------------------------------------ copy/move
 
-    static void opCopyMove(File srcWorld, File dstWorld, int x1, int z1, int x2, int z2, boolean move, boolean dryRun) throws IOException {
+    static void opCopyMove(File srcWorld, File dstWorld, int x1, int z1, int x2, int z2,
+                           boolean move, boolean dryRun, String dstSnapshotPath, String srcSnapshotPath) throws IOException {
+        RegistrySnapshot srcSnap = null;
+        RegistrySnapshot dstSnap = null;
+        if (srcSnapshotPath != null || dstSnapshotPath != null) {
+            if (srcSnapshotPath == null || dstSnapshotPath == null) {
+                System.out.println("重映射模式需要同时提供 --snapshot-src 与 --snapshot");
+                return;
+            }
+            srcSnap = RegistrySnapshot.load(new File(srcSnapshotPath));
+            dstSnap = RegistrySnapshot.load(new File(dstSnapshotPath));
+            if (!srcSnap.fingerprint.equals(dstSnap.fingerprint)) {
+                System.out.println("[WARN] 源/目标模组集不同 fingerprint: src=" + srcSnap.fingerprint.substring(0, Math.min(8, srcSnap.fingerprint.length()))
+                        + "... dst=" + dstSnap.fingerprint.substring(0, Math.min(8, dstSnap.fingerprint.length())) + "...");
+            }
+        }
         int minCx = Math.floorDiv(Math.min(x1, x2), 16);
         int maxCx = Math.floorDiv(Math.max(x1, x2), 16);
         int minCz = Math.floorDiv(Math.min(z1, z2), 16);
         int maxCz = Math.floorDiv(Math.max(z1, z2), 16);
         int copied = 0;
+        long missingTotal = 0;
         for (int cx = minCx; cx <= maxCx; cx++) {
             for (int cz = minCz; cz <= maxCz; cz++) {
                 File srcRegion = regionOf(srcWorld, cx, cz);
@@ -193,6 +212,21 @@ public class ChunkOpsTool {
                 if (!dstRegion.getParentFile().isDirectory()) {
                     System.out.println("目标世界缺少 region 目录: " + dstRegion.getParentFile());
                     return;
+                }
+                if (srcSnap != null && dstSnap != null) {
+                    // 跨模组集：重映射管线
+                    NbtNode root = RegionWriter.unpackChunk(payload);
+                    RemapEngine.ConflictReport report = new RemapEngine.ConflictReport();
+                    root = RemapEngine.remapChunk(root, srcSnap, dstSnap, new RemapEngine.Options(), report);
+                    missingTotal += report.missingBlocks.size();
+                    if (report.aborted) {
+                        System.out.println("chunk (" + cx + "," + cz + ") 中止（缺失方块）");
+                        continue;
+                    }
+                    if (!report.missingBlocks.isEmpty()) {
+                        System.out.println("chunk (" + cx + "," + cz + ") 冲突: " + report.summary());
+                    }
+                    payload = RegionWriter.packChunk(root);
                 }
                 RegionWriter rw = new RegionWriter(dstRegion);
                 rw.setChunk(srcIdx, payload);
@@ -209,7 +243,8 @@ public class ChunkOpsTool {
                 copied++;
             }
         }
-        System.out.println((move ? "move" : "copy") + " 完成: " + copied + " 个 chunk");
+        System.out.println((move ? "move" : "copy") + " 完成: " + copied + " 个 chunk"
+                + (srcSnap != null ? "，冲突 chunk 数（含缺失方块）: " + missingTotal : ""));
     }
 
     // ------------------------------------------------------------ buckets
