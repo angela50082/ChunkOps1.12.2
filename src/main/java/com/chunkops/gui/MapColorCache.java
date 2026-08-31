@@ -7,6 +7,7 @@ import net.minecraft.client.renderer.block.model.BakedQuad;
 import net.minecraft.client.renderer.block.model.IBakedModel;
 import net.minecraft.util.EnumFacing;
 import net.minecraft.client.renderer.texture.TextureAtlasSprite;
+import net.minecraft.util.math.BlockPos;
 
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
@@ -38,56 +39,99 @@ public class MapColorCache {
             if (state == null) return 0xFF888888;
             IBakedModel model = Minecraft.getMinecraft().getBlockRendererDispatcher().getModelForState(state);
             if (model == null) return 0xFF888888;
-            List<BakedQuad> quads = model.getQuads(state, EnumFacing.UP, 0L);
-            if (quads.isEmpty()) {
-                quads = model.getQuads(state, null, 0L);
-            }
-            if (quads.isEmpty()) return 0xFF888888;
-            TextureAtlasSprite sprite = quads.get(0).getSprite();
-            if (sprite == null) return 0xFF888888;
-            // 关键：使用 atlas 中已注册的 sprite（quad 上的 sprite 对象可能无帧数据）
-            try {
-                TextureAtlasSprite registered = Minecraft.getMinecraft().getTextureMapBlocks()
-                        .getAtlasSprite(sprite.getIconName());
-                if (registered != null) sprite = registered;
-            } catch (Exception ignored) {
-                // 保持原 sprite
-            }
-            int argb = sampleCenter(sprite);
-            if (argb == 0) {
-                if (fallbackCount < 10) {
-                    System.out.println("[ChunkOps] 取色失败 stateId=" + stateId);
+            // 优先朝上 quad，无顶面回退任意面；逐个 quad 尝试有效颜色
+            for (BakedQuad quad : quadsOf(model, state)) {
+                TextureAtlasSprite sprite = quad.getSprite();
+                if (sprite == null) continue;
+                // 关键：使用 atlas 中已注册的 sprite（quad 上的 sprite 对象可能无帧数据）
+                try {
+                    TextureAtlasSprite registered = Minecraft.getMinecraft().getTextureMapBlocks()
+                            .getAtlasSprite(sprite.getIconName());
+                    if (registered != null) sprite = registered;
+                } catch (Exception ignored) {
+                    // 保持原 sprite
                 }
-                fallbackCount++;
+                int c = quadColor(quad, sprite);
+                if (isValidColor(c)) return c;
+            }
+            // 兜底：方块地图色（模板方块多为黑/灰，但至少不显示紫黑噪点）
+            try {
+                int mc = (state.getMapColor(null, BlockPos.ORIGIN)).colorValue;
+                return mc != 0 ? (0xFF000000 | mc) : 0xFF888888;
+            } catch (Exception e) {
                 return 0xFF888888;
             }
-            return argb;
         } catch (Exception e) {
             return 0xFF888888;
         }
     }
 
-    /** 采样 sprite 纹理中心像素（兼容 frameTextureData 的一维/二维布局）。 */
-    static int sampleCenter(TextureAtlasSprite sprite) {
+    private static java.util.List<BakedQuad> quadsOf(IBakedModel model, IBlockState state) {
+        java.util.List<BakedQuad> quads = model.getQuads(state, EnumFacing.UP, 0L);
+        if (quads.isEmpty()) quads = model.getQuads(state, null, 0L);
+        return quads;
+    }
+
+    /** 颜色是否有效：alpha 足够且非品红（缺失纹理标志色）。 */
+    private static boolean isValidColor(int c) {
+        if (c == 0) return false;
+        int a = (c >>> 24) & 0xFF;
+        if (a < 128) return false;
+        int r = (c >> 16) & 0xFF;
+        int g = (c >> 8) & 0xFF;
+        int b = c & 0xFF;
+        // 品红/紫黑格（缺失纹理）：R 高、B 高、G 低
+        if (r > 180 && b > 180 && g < 100) return false;
+        return true;
+    }
+
+    /**
+     * 采样 sprite 纹理中心 + 周围 3×3 平均（跳过透明像素）。
+     * 注：1.12.2 BakedQuad 无 UV getter（1.13+ 才有），固定中心采样足够。
+     */
+    static int quadColor(BakedQuad quad, TextureAtlasSprite sprite) {
         int w = sprite.getIconWidth();
         int h = sprite.getIconHeight();
         if (w <= 0 || h <= 0) return 0;
+        int px = clamp(w / 2, 0, w - 1);
+        int py = clamp(h / 2, 0, h - 1);
+        long r = 0, g = 0, b = 0;
+        int n = 0;
+        for (int dy = -1; dy <= 1; dy++) {
+            for (int dx = -1; dx <= 1; dx++) {
+                int c = pixelAt(sprite, px + dx, py + dy);
+                if (c == 0) continue;
+                int a = (c >>> 24) & 0xFF;
+                if (a < 64) continue;
+                r += (c >> 16) & 0xFF;
+                g += (c >> 8) & 0xFF;
+                b += c & 0xFF;
+                n++;
+            }
+        }
+        if (n == 0) return 0;
+        return 0xFF000000 | ((int) (r / n) << 16) | ((int) (g / n) << 8) | (int) (b / n);
+    }
+
+    /** 取 sprite 帧数据中的一个像素（兼容一维 [mipmap][w*h] / 二维 [h][w] 布局）。 */
+    static int pixelAt(TextureAtlasSprite sprite, int x, int y) {
+        int w = sprite.getIconWidth();
+        int h = sprite.getIconHeight();
+        if (w <= 0 || h <= 0 || x < 0 || x >= w || y < 0 || y >= h) return 0;
         int[][] frame = sprite.getFrameTextureData(0);
         if (frame == null) return 0;
-        int cx = w / 2;
-        int cy = h / 2;
-        // 找最长的一行（布局：int[mipmap][width*height] 一维，或 int[height][width] 二维）
         int[] best = null;
         for (int[] row : frame) {
             if (row != null && (best == null || row.length > best.length)) best = row;
         }
         if (best == null) return 0;
-        if (best.length >= w * h) return best[cy * w + cx];        // 一维 mipmap0
-        if (frame.length > cy && frame[cy] != null && frame[cy].length > cx) {
-            return frame[cy][cx];                                   // 二维 [y][x]
-        }
-        if (best.length >= w) return best[cx];                      // 退化：单行
-        return best[best.length / 2];
+        if (best.length >= w * h) return best[y * w + x];
+        if (frame.length > y && frame[y] != null && frame[y].length > x) return frame[y][x];
+        return 0;
+    }
+
+    private static int clamp(int v, int min, int max) {
+        return v < min ? min : (v > max ? max : v);
     }
 
     /** 颜色 × 高度明暗（y 越高越亮）。 */
