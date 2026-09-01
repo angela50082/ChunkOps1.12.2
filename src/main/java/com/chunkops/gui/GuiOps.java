@@ -198,9 +198,8 @@ public class GuiOps {
 
     /**
      * 名称化粘贴：.mcops → 活注册表反解（按名+meta 重建数字 ID）→ 平移写入目标区域。
-     * 目标世界自动检测 JEID 格式（写入 JEID palette；JEID 的 reid mixin 不是 legacy 分支，
-     * 写 legacy 会 palette 越界崩溃，实测定案）。
-     * 同会话无损（名称化↔活注册表）；跨模组集缺失方块自动回退并报告。
+     * 性能：按 region 分组批量写入（每 region 一次读+写+备份——避免逐 chunk 全量重写导致主线程卡死）。
+     * JEID 世界检测后写对应格式（JEID reid mixin 无 legacy 分支，写 legacy 会越界崩溃，实测定案）。
      */
     public static String pasteAreaNamed(File worldDir, byte[] mcops,
                                         int originCx, int originCz, int targetCx, int targetCz) {
@@ -212,6 +211,8 @@ public class GuiOps {
                     com.chunkops.core.Mcops.importChunks(mcops, liveSnapshot(), report, jeid);
             int n = 0, errors = 0;
             String lastErr = "";
+            // 按 region 分组：Map<regionKey, RegionWriter>
+            java.util.Map<String, Object[]> regionWriters = new java.util.LinkedHashMap<String, Object[]>();
             for (com.chunkops.verify.NbtNode root : roots) {
                 try {
                     com.chunkops.verify.NbtNode level = root.get("Level");
@@ -227,21 +228,54 @@ public class GuiOps {
                     byte[] payload = com.chunkops.core.RegionWriter.packChunk(root);
                     int rx = Math.floorDiv(cx, 32);
                     int rz = Math.floorDiv(cz, 32);
-                    File region = new File(new File(worldDir, "region"), "r." + rx + "." + rz + ".mca");
-                    File parent = region.getParentFile();
-                    if (!parent.isDirectory() && !parent.mkdirs()) return "目标缺少 region 目录";
-                    com.chunkops.core.RegionWriter rw = new com.chunkops.core.RegionWriter(region);
-                    rw.setChunk((cz & 31) * 32 + (cx & 31), payload);
-                    rw.write();
+                    String rk = rx + "," + rz;
+                    Object[] rwObj = regionWriters.get(rk);
+                    if (rwObj == null) {
+                        File region = new File(new File(worldDir, "region"), "r." + rx + "." + rz + ".mca");
+                        File parent = region.getParentFile();
+                        if (!parent.isDirectory() && !parent.mkdirs()) return "目标缺少 region 目录";
+                        rwObj = new Object[]{new com.chunkops.core.RegionWriter(region), region};
+                        regionWriters.put(rk, rwObj);
+                    }
+                    ((com.chunkops.core.RegionWriter) rwObj[0]).setChunk((cz & 31) * 32 + (cx & 31), payload);
                     n++;
                 } catch (Exception ex) {
                     errors++;
                     lastErr = ex.getMessage();
                 }
             }
+            // 每 region 一次写盘（自动备份 + 原子写）
+            for (Object[] rwObj : regionWriters.values()) {
+                try {
+                    ((com.chunkops.core.RegionWriter) rwObj[0]).write();
+                } catch (Exception ex) {
+                    errors++;
+                    lastErr = ex.getMessage();
+                }
+            }
+            // 回读校验（防御）：写入的 chunk 必须可重新完整解析
+            int verifyFail = 0;
+            for (Object[] rwObj : regionWriters.values()) {
+                try {
+                    File region = (File) rwObj[1];
+                    com.chunkops.verify.RegionReader rr = new com.chunkops.verify.RegionReader(region);
+                    for (int i = 0; i < 1024; i++) {
+                        byte[] back = rr.readChunkData(i);
+                        if (back == null) continue;
+                        com.chunkops.verify.NbtNode root = com.chunkops.core.RegionWriter.unpackChunk(back);
+                        if (root.get("Level") == null) verifyFail++;
+                    }
+                } catch (Exception ex) {
+                    verifyFail++;
+                }
+            }
+            if (verifyFail > 0) {
+                return "粘贴完成: " + n + " 个区块 → 目标 (" + targetCx + "," + targetCz
+                        + ")，但回读校验失败 " + verifyFail + " 个（数据异常，请勿进游戏并反馈日志）";
+            }
             StringBuilder sb = new StringBuilder();
             sb.append("粘贴完成: ").append(n).append(" 个区块 → 目标 (").append(targetCx)
-                    .append(",").append(targetCz).append(")");
+                    .append(",").append(targetCz).append(")，region ").append(regionWriters.size()).append(" 个");
             if (report.blocksFallenBack > 0) {
                 sb.append("；缺失方块回退 ").append(report.blocksFallenBack)
                         .append(" 个（").append(report.missingPalette.size()).append(" 种: ");
