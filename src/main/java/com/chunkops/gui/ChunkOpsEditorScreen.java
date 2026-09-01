@@ -160,6 +160,8 @@ public class ChunkOpsEditorScreen extends GuiScreen {
         int pendingCount = 0;
         int exactCount = 0;
         if (currentWorldDir != null) {
+            // 顶点色批量渲染（与 drawRect 同路径，100% 正常；绕开 DynamicTexture 在整合包环境的暗化）
+            java.util.List<int[]> visible = new java.util.ArrayList<int[]>(); // [sx, sy, px, py, color]
             for (int cx = minCx; cx <= maxCx; cx++) {
                 for (int cz = minCz; cz <= maxCz; cz++) {
                     int sx = this.width / 2 + (int) Math.round((cx * 16 - viewX) * ppb);
@@ -167,19 +169,16 @@ public class ChunkOpsEditorScreen extends GuiScreen {
                     int size = Math.max(1, (int) Math.round(16 * ppb));
                     ChunkMapRenderer.ChunkMapTile tile = renderer.getOrLoad(currentWorldDir, cx, cz);
                     if (tile != null) {
-                        ResourceLocation loc = renderer.textureFor(
-                                ChunkMapRenderer.key(currentWorldDir.getAbsolutePath(), cx, cz), tile,
-                                this.mc.getTextureManager());
-                        this.mc.getTextureManager().bindTexture(loc);
-                        drawTexturedQuad(sx, sy, size, size);
+                        collectTileQuads(visible, tile, sx, sy, size);
                         loadedCount++;
                         exactCount += tile.exactCols;
                     } else {
-                        drawRect(sx, sy, sx + size, sy + size, renderer.pendingColor());
+                        visible.add(new int[]{sx, sy, size, size, 0, renderer.pendingColor(), 0});
                         pendingCount++;
                     }
                 }
             }
+            drawTileQuads(visible);
         }
 
         // ---- 区块网格与坐标轴（画在地图之上） ----
@@ -231,27 +230,16 @@ public class ChunkOpsEditorScreen extends GuiScreen {
         this.fontRenderer.drawString("左键框选 · 中键拖动 · 右键菜单 · 滚轮缩放 · ESC 返回",
                 this.width / 2 - 120, this.height - 12, 0x888888);
 
-        // ---- 色板自检（调试）：红/绿/蓝/湖水蓝参考色，走与地图完全相同的纹理路径 ----
-        // 用于验证 DynamicTexture 颜色通道是否正常（若显示异常即渲染管线 bug）
+        // ---- 色板自检（调试）：红/绿/蓝/湖水蓝参考色，与地图同路径（顶点色渲染）
+        // 已定案：DynamicTexture 在整合包环境被暗化 ×0.533（对照实验 A/B 亮 C 暗），
+        // 地图已改为顶点色批渲染；色板用于确认新路径亮度正确
         int[] palette = {0xFFFF0000, 0xFF00FF00, 0xFF0000FF, 0xFF0B16B3};
         int py0 = this.height - 66;
         for (int i = 0; i < palette.length; i++) {
-            ResourceLocation ploc = renderer.textureFor("palette#" + i, renderer.flatTile(palette[i]),
-                    this.mc.getTextureManager());
-            this.mc.getTextureManager().bindTexture(ploc);
-            drawTexturedQuad(this.width - 30 - (palette.length - i) * 24, py0, 20, 20);
+            drawRect(this.width - 30 - (palette.length - i) * 24, py0,
+                    this.width - 30 - (palette.length - i) * 24 + 20, py0 + 20, palette[i]);
         }
         this.fontRenderer.drawString("色板", this.width - 30 - (palette.length) * 24 - 26, py0 + 5, 0xFFFFFF);
-
-        // ---- 渲染对照实验（定位"夜间模式"暗化）：A=drawRect 纯色(非纹理) / B=vanilla 方块纹理 ----
-        // A(红块, drawRect) 亮 + B(石头纹理) 亮 + 色板(哑光 DynamicTexture) 暗 => 只 DynamicTexture 暗化
-        // A 暗 + B 暗 => 渲染管线整体暗化（光影 shader 后处理/系统级）→ 排查环境
-        net.minecraft.client.renderer.GlStateManager.color(1.0F, 1.0F, 1.0F, 1.0F);
-        drawRect(this.width - 232, py0, this.width - 196, py0 + 36, 0xFFFF0000);
-        this.mc.getRenderItem().renderItemIntoGUI(
-                new net.minecraft.item.ItemStack(net.minecraft.init.Blocks.STONE),
-                this.width - 190, py0 + 8);
-        this.fontRenderer.drawString("对照", this.width - 232, py0 + 42, 0xFFFFFF);
 
         // 日志（左侧，半透明背景）
         if (!log.isEmpty()) {
@@ -266,16 +254,50 @@ public class ChunkOpsEditorScreen extends GuiScreen {
         super.drawScreen(mouseX, mouseY, partialTicks);
     }
 
-    /** 以 0..1 纹理坐标绘制贴图（DynamicTexture 非 256 atlas，不能用 drawTexturedModalRect）。 */
-    private void drawTexturedQuad(int x, int y, int w, int h) {
+    /** 收集一个 tile 的色块 quad（步长随 size 自适应，控制顶点量；≤16×16 色块/chunk）。 */
+    private void collectTileQuads(java.util.List<int[]> out, ChunkMapRenderer.ChunkMapTile tile,
+                                  int sx, int sy, int size) {
+        int step = size >= 24 ? 2 : (size >= 12 ? 3 : size);
+        if (step < 1) step = 1;
+        int cols = Math.max(1, Math.min(16, (size + step - 1) / step));
+        int cw = Math.max(1, size / cols);
+        for (int cz2 = 0; cz2 < cols; cz2++) {
+            int ty = Math.min(15, cz2 * 16 / cols);
+            for (int cx2 = 0; cx2 < cols; cx2++) {
+                int tx = Math.min(15, cx2 * 16 / cols);
+                out.add(new int[]{sx + cx2 * cw, sy + cz2 * cw, cw, cw, tile.colors[ty * 16 + tx]});
+            }
+        }
+    }
+
+    /**
+     * 批量绘制色块（POSITION_COLOR，与 drawRect 相同渲染路径——对照实验验证 100% 正常；
+     * DynamicTexture 渲染在整合包环境被暗化 ×0.533，故弃用）。分批防 BufferBuilder 溢出。
+     */
+    private void drawTileQuads(java.util.List<int[]> quads) {
+        if (quads.isEmpty()) return;
+        // 色块全部矩形的边界，先画底（不重复）
+        final int BATCH = 12000; // quad 数/批（每 quad 4 顶点，安全余量内）
         Tessellator tess = Tessellator.getInstance();
-        BufferBuilder buf = tess.getBuffer();
-        buf.begin(7, DefaultVertexFormats.POSITION_TEX);
-        buf.pos(x, y + h, (double) this.zLevel).tex(0.0, 1.0).endVertex();
-        buf.pos(x + w, y + h, (double) this.zLevel).tex(1.0, 1.0).endVertex();
-        buf.pos(x + w, y, (double) this.zLevel).tex(1.0, 0.0).endVertex();
-        buf.pos(x, y, (double) this.zLevel).tex(0.0, 0.0).endVertex();
-        tess.draw();
+        for (int off = 0; off < quads.size(); off += BATCH) {
+            int end = Math.min(quads.size(), off + BATCH);
+            BufferBuilder buf = tess.getBuffer();
+            buf.begin(7, DefaultVertexFormats.POSITION_COLOR);
+            for (int i = off; i < end; i++) {
+                int[] q = quads.get(i);
+                int x = q[0], y = q[1], w = q[2], h = q[3];
+                int c = q[4];
+                float r = ((c >> 16) & 0xFF) / 255.0f;
+                float g = ((c >> 8) & 0xFF) / 255.0f;
+                float b = (c & 0xFF) / 255.0f;
+                float a = ((c >>> 24) & 0xFF) / 255.0f;
+                buf.pos(x, y + h, (double) this.zLevel).color(r, g, b, a).endVertex();
+                buf.pos(x + w, y + h, (double) this.zLevel).color(r, g, b, a).endVertex();
+                buf.pos(x + w, y, (double) this.zLevel).color(r, g, b, a).endVertex();
+                buf.pos(x, y, (double) this.zLevel).color(r, g, b, a).endVertex();
+            }
+            tess.draw();
+        }
     }
 
     @Override
