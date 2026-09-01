@@ -134,10 +134,10 @@ public class MapColorCache {
         return v < min ? min : (v > max ? max : v);
     }
 
-    /** 颜色 × 高度明暗（y 越高越亮）。 */
+    /** 颜色 × 高度明暗（y 越高越亮）。调亮版（原 0.72 起用户反馈"夜间模式"）。 */
     public static int shade(int argb, int y) {
         if (argb == 0) return 0;
-        double f = 0.72 + 0.28 * (y / 255.0);
+        double f = 0.85 + 0.15 * (y / 255.0);
         int a = (argb >>> 24) & 0xFF;
         int r = (int) (((argb >> 16) & 0xFF) * f);
         int g = (int) (((argb >> 8) & 0xFF) * f);

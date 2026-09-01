@@ -180,14 +180,21 @@ public class ExactMapCollector {
                 } catch (Exception e) {
                     LOG.warn("COPM 读取失败（重建）: " + file + " : " + e.getMessage());
                 }
-                if (reg == null) reg = new ExactMapFile.ExactRegion(256, 256);
+                // 旧版 256 宽文件（尺寸 bug）自动重建为 512×512
+                if (reg == null || reg.width != 512 || reg.height != 512) {
+                    reg = new ExactMapFile.ExactRegion(512, 512);
+                }
 
                 int base = (cx & 31) * 16;
                 int baseZ = (cz & 31) * 16;
                 for (int z = 0; z < 16; z++) {
                     for (int x = 0; x < 16; x++) {
                         int sy = findSurface(chunk, x, z);
-                        int gi = (baseZ + z) * 256 + (base + x);
+                        int gi = (baseZ + z) * reg.width + (base + x);
+                        if (gi < 0 || gi >= reg.color.length) {
+                            // 旧版 256 宽文件：越界列跳过（重采后自动修正）
+                            continue;
+                        }
                         if (sy < 0) {
                             // 虚空/整列空气：空白约定
                             reg.color[gi] = 0;

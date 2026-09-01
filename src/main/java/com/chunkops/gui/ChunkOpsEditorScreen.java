@@ -229,6 +229,18 @@ public class ChunkOpsEditorScreen extends GuiScreen {
         this.fontRenderer.drawString("左键框选 · 中键拖动 · 右键菜单 · 滚轮缩放 · ESC 返回",
                 this.width / 2 - 120, this.height - 12, 0x888888);
 
+        // ---- 色板自检（调试）：红/绿/蓝/湖水蓝参考色，走与地图完全相同的纹理路径 ----
+        // 用于验证 DynamicTexture 颜色通道是否正常（若显示异常即渲染管线 bug）
+        int[] palette = {0xFFFF0000, 0xFF00FF00, 0xFF0000FF, 0xFF0B16B3};
+        int py0 = this.height - 66;
+        for (int i = 0; i < palette.length; i++) {
+            ResourceLocation ploc = renderer.textureFor("palette#" + i, renderer.flatTile(palette[i]),
+                    this.mc.getTextureManager());
+            this.mc.getTextureManager().bindTexture(ploc);
+            drawTexturedQuad(this.width - 30 - (palette.length - i) * 24, py0, 20, 20);
+        }
+        this.fontRenderer.drawString("色板", this.width - 30 - (palette.length) * 24 - 26, py0 + 5, 0xFFFFFF);
+
         // 日志（左侧，半透明背景）
         if (!log.isEmpty()) {
             int ly = this.height - 34 - log.size() * 10;

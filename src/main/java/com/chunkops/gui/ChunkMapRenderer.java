@@ -56,6 +56,8 @@ public class ChunkMapRenderer {
         }
     };
     private final Map<String, Future<ChunkMapTile>> pending = new HashMap<String, Future<ChunkMapTile>>();
+    /** 纹理命名递增序号（主线程专用，保证唯一）。 */
+    private int texSeq = 0;
 
     private final ExecutorService pool = Executors.newFixedThreadPool(4, new ThreadFactory() {
         public Thread newThread(Runnable r) {
@@ -134,7 +136,8 @@ public class ChunkMapRenderer {
     public ResourceLocation textureFor(String key, ChunkMapTile tile, TextureManager tm) {
         ResourceLocation loc = textures.get(key);
         if (loc == null) {
-            loc = new ResourceLocation("chunkops", "map/" + key.hashCode());
+            // 唯一命名（原 hashCode 命名有碰撞风险 → 不同 chunk 复用同一纹理 = "两个一模一样的地方"）
+            loc = new ResourceLocation("chunkops", "map/t" + (++texSeq));
             DynamicTexture dt = new DynamicTexture(16, 16);
             int[] data = dt.getTextureData();
             // 关键：1.12.2 DynamicTexture 像素为 ABGR（GL_RGBA 小端），ARGB 直接放入会红蓝交换
@@ -155,6 +158,13 @@ public class ChunkMapRenderer {
 
     public int pendingColor() {
         return PENDING;
+    }
+
+    /** 调试自检：生成一个全 tile 单色的平色数据（与地图 tile 完全相同的渲染路径）。 */
+    public ChunkMapTile flatTile(int color) {
+        ChunkMapTile t = new ChunkMapTile();
+        java.util.Arrays.fill(t.colors, color);
+        return t;
     }
 
     public int background() {
@@ -227,11 +237,14 @@ public class ChunkMapRenderer {
                 for (int x = 0; x < 16; x++) {
                     int col = z * 16 + x;
                     if (exact != null) {
-                        int gi = (baseZ + z) * exact.width + (baseX + x);
-                        if (exact.hasData(gi)) {
-                            tile.colors[col] = exact.color[gi];
-                            tile.exactCols++;
-                            continue;
+                        // 越界防御：旧版 256 宽文件（尺寸 bug）的越界列视为无数据 → 回退文件级
+                        if ((baseX + x) < exact.width && (baseZ + z) < exact.height) {
+                            int gi = (baseZ + z) * exact.width + (baseX + x);
+                            if (exact.hasData(gi)) {
+                                tile.colors[col] = exact.color[gi];
+                                tile.exactCols++;
+                                continue;
+                            }
                         }
                     }
                     int y = findSurfaceY(secStates, heightMap, col);
