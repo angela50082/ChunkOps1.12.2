@@ -56,6 +56,7 @@ public class ChunkOpsEditorScreen extends GuiScreen {
 
     private boolean readOnly = false;
     private java.util.Map<Long, byte[]> clipboard = null;
+    private int clipOriginCx = 0, clipOriginCz = 0; // 剪贴板源选区左上角
     /** 面板底部同步提示（logLine 时更新）。 */
     private String panelNotice = "";
 
@@ -608,7 +609,7 @@ public class ChunkOpsEditorScreen extends GuiScreen {
                 "C           清空选区",
                 "T           剪裁(保留选区)",
                 "S           统计选区",
-                "Ctrl+C/V    复制 / 粘贴",
+                "Ctrl+C/V    复制 / 粘贴(到视图中心)",
                 "Ctrl+滚轮   缩放地图",
                 "ESC         返回主菜单",
         };
@@ -682,22 +683,36 @@ public class ChunkOpsEditorScreen extends GuiScreen {
                     logLine(GuiOps.removeChunk(currentWorldDir, cx, cz, false));
                 }
             }
+            renderer.clear(); // 数据已变：地图缓存失效重载
         } else if (op.equals("clear")) {
             for (int cx = selMinCx; cx <= selMaxCx; cx++) {
                 for (int cz = selMinCz; cz <= selMaxCz; cz++) {
                     logLine(GuiOps.clearChunk(currentWorldDir, cx, cz, false));
                 }
             }
+            renderer.clear();
         } else if (op.equals("trim")) {
             logLine(GuiOps.trimArea(currentWorldDir, selMinCx, selMaxCx, selMinCz, selMaxCz, false));
+            renderer.clear();
         } else if (op.equals("stats")) {
             String s = GuiOps.statsArea(currentWorldDir, selMinCx, selMaxCx, selMinCz, selMaxCz);
             for (String line : s.split("\n")) logLine(line);
         } else if (op.equals("copy")) {
             clipboard = GuiOps.copyArea(currentWorldDir, selMinCx, selMaxCx, selMinCz, selMaxCz);
-            logLine(clipboard != null ? "已复制 " + clipboard.size() + " 个区块到剪贴板" : "复制失败");
+            clipOriginCx = selMinCx;
+            clipOriginCz = selMinCz;
+            logLine(clipboard != null ? "已复制 " + clipboard.size() + " 个区块到剪贴板（源 "
+                    + clipOriginCx + "," + clipOriginCz + "）" : "复制失败");
         } else if (op.equals("paste")) {
-            logLine(GuiOps.pasteArea(currentWorldDir, clipboard));
+            if (clipboard == null || clipboard.isEmpty()) {
+                logLine("剪贴板为空（先复制选区）");
+                return;
+            }
+            // 粘贴到当前视图中心（无需框选）：复制 A → 滚动到目标 → 粘贴
+            int pcx = (int) Math.floor(viewX / 16);
+            int pcz = (int) Math.floor(viewZ / 16);
+            logLine(GuiOps.pasteArea(currentWorldDir, clipboard, clipOriginCx, clipOriginCz, pcx, pcz));
+            renderer.clear(); // 数据已变：地图缓存失效重载
         }
     }
 

@@ -80,29 +80,47 @@ public class GuiOps {
         return clipboard;
     }
 
-    /** 粘贴：把剪贴板 chunk 写回目标世界（同坐标，自动备份）。返回日志文本。 */
-    public static String pasteArea(File worldDir, java.util.Map<Long, byte[]> clipboard) {
+    /**
+     * 粘贴：把剪贴板 chunk 写到「以 (targetCx,targetCz) 为左上角的目标区域」
+     * （剪贴板内容按源选区 origin 偏移平移），同模组集原样写入，自动建目录/备份。
+     * 返回日志文本。
+     */
+    public static String pasteArea(File worldDir, java.util.Map<Long, byte[]> clipboard,
+                                   int originCx, int originCz, int targetCx, int targetCz) {
         if (clipboard == null || clipboard.isEmpty()) return "剪贴板为空";
         int n = 0;
+        int errors = 0;
+        // 目标存在则记录（日志用）
         for (java.util.Map.Entry<Long, byte[]> e : clipboard.entrySet()) {
             long key = e.getKey();
-            int cx = (int) (key >> 32);
-            int cz = (int) (key & 0xFFFFFFFFL);
+            int srcCx = (int) (key >> 32);
+            int srcCz = (int) (key & 0xFFFFFFFFL);
+            int dx = srcCx - originCx;
+            int dz = srcCz - originCz;
+            int cx = targetCx + dx;
+            int cz = targetCz + dz;
             try {
                 int rx = Math.floorDiv(cx, 32);
                 int rz = Math.floorDiv(cz, 32);
                 File region = new File(new File(worldDir, "region"), "r." + rx + "." + rz + ".mca");
-                if (!region.getParentFile().isDirectory()) return "目标缺少 region 目录";
+                File parent = region.getParentFile();
+                if (!parent.isDirectory() && !parent.mkdirs()) return "目标缺少 region 目录";
                 com.chunkops.core.RegionWriter rw = new com.chunkops.core.RegionWriter(region);
                 rw.setChunk((cz & 31) * 32 + (cx & 31), e.getValue());
                 rw.write();
                 n++;
             } catch (Exception ex) {
-                return "粘贴失败 (" + cx + "," + cz + "): " + ex.getMessage();
+                errors++;
+                if (errors <= 3) {
+                    logLastError = "粘贴失败 (" + cx + "," + cz + "): " + ex.getMessage();
+                }
             }
         }
-        return "粘贴完成: " + n + " 个区块";
+        if (errors > 0) return "粘贴完成: " + n + " 个区块（含 " + errors + " 个失败: " + logLastError + "）";
+        return "粘贴完成: " + n + " 个区块 → 目标 (" + targetCx + "," + targetCz + ")";
     }
+
+    private static String logLastError = "";
 
     // ------------------------------------------------------------ stats
 
