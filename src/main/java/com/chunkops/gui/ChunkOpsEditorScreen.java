@@ -173,7 +173,7 @@ public class ChunkOpsEditorScreen extends GuiScreen {
                         loadedCount++;
                         exactCount += tile.exactCols;
                     } else {
-                        visible.add(new int[]{sx, sy, size, size, 0, renderer.pendingColor(), 0});
+                        visible.add(new int[]{sx, sy, size, size, renderer.pendingColor()});
                         pendingCount++;
                     }
                 }
@@ -254,18 +254,23 @@ public class ChunkOpsEditorScreen extends GuiScreen {
         super.drawScreen(mouseX, mouseY, partialTicks);
     }
 
-    /** 收集一个 tile 的色块 quad（步长随 size 自适应，控制顶点量；≤16×16 色块/chunk）。 */
+    /**
+     * 收集一个 tile 的色块 quad：每 ~2px 一个色块（clamp 2..16×16），
+     * 用精确边界 (ci*size/cols .. (ci+1)*size/cols) 铺满无缝隙。
+     */
     private void collectTileQuads(java.util.List<int[]> out, ChunkMapRenderer.ChunkMapTile tile,
                                   int sx, int sy, int size) {
-        int step = size >= 24 ? 2 : (size >= 12 ? 3 : size);
-        if (step < 1) step = 1;
-        int cols = Math.max(1, Math.min(16, (size + step - 1) / step));
-        int cw = Math.max(1, size / cols);
+        int cols = Math.max(2, Math.min(16, size / 2));
         for (int cz2 = 0; cz2 < cols; cz2++) {
             int ty = Math.min(15, cz2 * 16 / cols);
+            int qy = sy + cz2 * size / cols;
+            int qy2 = sy + (cz2 + 1) * size / cols;
             for (int cx2 = 0; cx2 < cols; cx2++) {
                 int tx = Math.min(15, cx2 * 16 / cols);
-                out.add(new int[]{sx + cx2 * cw, sy + cz2 * cw, cw, cw, tile.colors[ty * 16 + tx]});
+                int qx = sx + cx2 * size / cols;
+                int qx2 = sx + (cx2 + 1) * size / cols;
+                out.add(new int[]{qx, qy, Math.max(1, qx2 - qx), Math.max(1, qy2 - qy),
+                        tile.colors[ty * 16 + tx]});
             }
         }
     }
