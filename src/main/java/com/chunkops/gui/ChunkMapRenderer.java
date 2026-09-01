@@ -140,15 +140,10 @@ public class ChunkMapRenderer {
             loc = new ResourceLocation("chunkops", "map/t" + (++texSeq));
             DynamicTexture dt = new DynamicTexture(16, 16);
             int[] data = dt.getTextureData();
-            // 关键：1.12.2 DynamicTexture 像素为 ABGR（GL_RGBA 小端），ARGB 直接放入会红蓝交换
-            for (int i = 0; i < 256; i++) {
-                int c = tile.colors[i];
-                int a = c >>> 24;
-                int r = (c >> 16) & 0xFF;
-                int g = (c >> 8) & 0xFF;
-                int b = c & 0xFF;
-                data[i] = (a << 24) | (b << 16) | (g << 8) | r;
-            }
+            // 关键：1.12.2 DynamicTexture 像素就是 ARGB（0xAARRGGBB）直填。
+            // （原 "ABGR 转换"经色板自检实证为错误：红↔蓝交换；文件级"正确"是
+            //   sprite 帧 ABGR 提取错(交换1) × 转换(交换2) 双重抵消的假象）
+            System.arraycopy(tile.colors, 0, data, 0, 256);
             dt.updateDynamicTexture();
             tm.loadTexture(loc, dt);
             textures.put(key, loc);
@@ -241,7 +236,12 @@ public class ChunkMapRenderer {
                         if ((baseX + x) < exact.width && (baseZ + z) < exact.height) {
                             int gi = (baseZ + z) * exact.width + (baseX + x);
                             if (exact.hasData(gi)) {
-                                tile.colors[col] = exact.color[gi];
+                                // 精确层：v2 起数据存原色，高度明暗显示端统一应用；v1 旧数据已含 shade 不再叠加
+                                int c = exact.color[gi];
+                                if (exact.version >= 2) {
+                                    c = MapColorCache.shade(c, exact.heightY[gi] & 0xFF);
+                                }
+                                tile.colors[col] = c;
                                 tile.exactCols++;
                                 continue;
                             }

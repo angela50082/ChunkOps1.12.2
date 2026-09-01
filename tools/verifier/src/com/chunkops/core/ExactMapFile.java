@@ -33,19 +33,21 @@ import java.util.zip.GZIPOutputStream;
 public class ExactMapFile {
 
     public static final int MAGIC = 0x434F504D; // "COPM"
-    public static final int VERSION = 1;
+    public static final int VERSION = 2;        // v2: 颜色存"原色"（高度明暗在显示端统一应用）
     public static final int DEFAULT_SIZE = 256;
 
     /** 一个 region 的列数据（256×256，含字典）。 */
     public static class ExactRegion {
         public final int width;
         public final int height;
-        public final int[] color;     // ARGB
+        public final int[] color;     // ARGB（v2 起为未 shade 原色；v1 为已 shade）
         public final byte[] heightY;  // 地表 y（0..255）
         public final short[] blockIdx; // 方块名字典索引（0=air）
         public final byte[] biomeIdx;  // 生物群系名字典索引（0=未知）
         public final List<String> blockNames = new ArrayList<String>();
         public final List<String> biomeNames = new ArrayList<String>();
+        /** 文件版本（读入时设置；写盘时恒为 VERSION）。 */
+        public int version = VERSION;
 
         public ExactRegion(int width, int height) {
             this.width = width;
@@ -148,6 +150,7 @@ public class ExactMapFile {
                 throw new IOException("尺寸非法: " + w + "x" + h);
             }
             ExactRegion r = new ExactRegion(w, h);
+            r.version = ver;
             readDict(body, r.blockNames);
             readDict(body, r.biomeNames);
             int n = w * h;

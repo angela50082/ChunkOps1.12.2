@@ -87,7 +87,9 @@ public class MapColorCache {
 
     /**
      * 采样 sprite 纹理中心 + 周围 3×3 平均（跳过透明像素）。
-     * 注：1.12.2 BakedQuad 无 UV getter（1.13+ 才有），固定中心采样足够。
+     * 注意：1.12.2 TextureAtlasSprite 帧数据像素为 **ABGR**（0xAABBGGRR，GL_RGBA 字节序），
+     * 须按 r=低字节 提取；原按 ARGB 提取会红蓝交换（与 textureFor 的旧转换双重抵消成
+     * 文件级"看起来正确"的假象——色板自检已实证）。
      */
     static int quadColor(BakedQuad quad, TextureAtlasSprite sprite) {
         int w = sprite.getIconWidth();
@@ -103,9 +105,10 @@ public class MapColorCache {
                 if (c == 0) continue;
                 int a = (c >>> 24) & 0xFF;
                 if (a < 64) continue;
-                r += (c >> 16) & 0xFF;
+                // ABGR：低字节=R，bit8-15=G，bit16-23=B
+                r += c & 0xFF;
                 g += (c >> 8) & 0xFF;
-                b += c & 0xFF;
+                b += (c >> 16) & 0xFF;
                 n++;
             }
         }
@@ -134,10 +137,10 @@ public class MapColorCache {
         return v < min ? min : (v > max ? max : v);
     }
 
-    /** 颜色 × 高度明暗（y 越高越亮）。调亮版（原 0.72 起用户反馈"夜间模式"）。 */
+    /** 颜色 × 高度明暗（y 越高越亮）。0.92 起（用户反馈仍暗 → 接近原色，仅轻微高度 shading）。 */
     public static int shade(int argb, int y) {
         if (argb == 0) return 0;
-        double f = 0.85 + 0.15 * (y / 255.0);
+        double f = 0.92 + 0.08 * (y / 255.0);
         int a = (argb >>> 24) & 0xFF;
         int r = (int) (((argb >> 16) & 0xFF) * f);
         int g = (int) (((argb >> 8) & 0xFF) * f);

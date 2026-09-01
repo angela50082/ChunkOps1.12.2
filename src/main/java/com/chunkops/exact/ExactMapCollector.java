@@ -250,7 +250,7 @@ public class ExactMapCollector {
         return -1;
     }
 
-    /** Xaero 式取色栈：MapColor 基础色 × BlockColors 生物群系调色 + 高度明暗。 */
+    /** Xaero 式取色栈：MapColor 基础色 × BlockColors 生物群系调色（高度明暗在显示端做，数据存原色）。 */
     static int sampleColor(World world, IBlockState st, BlockPos pos, int y) {
         int base = 0x888888;
         try {
@@ -270,8 +270,7 @@ public class ExactMapCollector {
         int r = ((base >> 16) & 0xFF) * ((tint >> 16) & 0xFF) / 255;
         int g = ((base >> 8) & 0xFF) * ((tint >> 8) & 0xFF) / 255;
         int b = (base & 0xFF) * (tint & 0xFF) / 255;
-        int c = 0xFF000000 | (r << 16) | (g << 8) | b;
-        return MapColorCache.shade(c, Math.max(0, Math.min(255, y)));
+        return 0xFF000000 | (r << 16) | (g << 8) | b;
     }
 
     /** 方块名字典索引（"modid:block#meta"；空气=0）。 */
