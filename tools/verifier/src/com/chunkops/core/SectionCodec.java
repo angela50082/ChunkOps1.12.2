@@ -22,16 +22,34 @@ public class SectionCodec {
     /** 解码一个 section NBT 为 stateId 数组；无法解码时返回 null（并说明原因）。 */
     public static int[] decode(NbtNode section) {
         NbtNode blocksNode = section.get("Blocks");
+        NbtNode palette = section.get("Palette");
         if (blocksNode != null && blocksNode.type == NbtNode.TAG_BYTE_ARRAY) {
+            // JEID：Blocks = palette 索引 byte[4096]，Palette = int[] stateId（支持 id>4095，实测）
+            if (palette != null && palette.type == NbtNode.TAG_INT_ARRAY) {
+                return decodeJeidIndex(section, (byte[]) blocksNode.value, (int[]) palette.value);
+            }
             return decodeLegacy(section, (byte[]) blocksNode.value);
         }
-        NbtNode palette = section.get("Palette");
         NbtNode blockStates = section.get("BlockStates");
         if (palette != null && blockStates != null
                 && palette.type == NbtNode.TAG_LIST && blockStates.type == NbtNode.TAG_LONG_ARRAY) {
             return decodePalette(palette, (long[]) blockStates.value);
         }
         return null; // 空 section 或无数据
+    }
+
+    /**
+     * JEID 索引数组格式（GreedyCraft 实测，2026-09-01）：
+     * Blocks byte[4096] = Palette int[] 的索引；Palette 项 = stateId（id<<4|meta，id 可 >4095）；
+     * Data nibble 为兼容字段（palette 已含全状态，忽略）。
+     */
+    static int[] decodeJeidIndex(NbtNode section, byte[] indices, int[] palValues) {
+        int[] stateIds = new int[BLOCKS_PER_SECTION];
+        for (int i = 0; i < BLOCKS_PER_SECTION; i++) {
+            int idx = indices[i] & 0xFF;
+            stateIds[i] = idx >= 0 && idx < palValues.length ? palValues[idx] : 0;
+        }
+        return stateIds;
     }
 
     static int[] decodeLegacy(NbtNode section, byte[] blocks) {
@@ -65,8 +83,11 @@ public class SectionCodec {
 
     // ------------------------------------------------------------ encode
 
-    /** 由 stateId 数组编码为 legacy 数组 section（Blocks/Data/可选 Add）。 */
+    /** 由 stateId 数组编码为 section：存在 id>0xFFF 方块时用 palette（JEID 兼容），否则 legacy 数组。 */
     public static NbtNode encodeLegacy(int[] stateIds) {
+        for (int s : stateIds) {
+            if ((s >> 4) > 0xFFF) return encodePalette(stateIds);
+        }
         byte[] blocks = new byte[BLOCKS_PER_SECTION];
         byte[] data = new byte[BLOCKS_PER_SECTION / 2];
         byte[] add = null;
@@ -119,6 +140,40 @@ public class SectionCodec {
         return true;
     }
 
+    /**
+     * palette 编码（JEID 索引数组格式，decodeJeidIndex 的逆操作）：
+     * Palette int[]（stateId，支持 >4095）+ Blocks byte[4096]（索引）+ Data nibble（meta 冗余）。
+     * 注意：非 1.13 blockStates 格式（JEID 实测定案）。
+     */
+    public static NbtNode encodePalette(int[] stateIds) {
+        java.util.Map<Integer, Integer> stateToIdx = new java.util.HashMap<Integer, Integer>();
+        java.util.List<Integer> pal = new java.util.ArrayList<Integer>();
+        byte[] idxs = new byte[stateIds.length];
+        for (int i = 0; i < stateIds.length; i++) {
+            Integer idx = stateToIdx.get(stateIds[i]);
+            if (idx == null) {
+                idx = Integer.valueOf(pal.size());
+                stateToIdx.put(stateIds[i], idx);
+                pal.add(Integer.valueOf(stateIds[i]));
+            }
+            idxs[i] = (byte) idx.intValue();
+        }
+        int[] palVals = new int[pal.size()];
+        for (int i = 0; i < pal.size(); i++) palVals[i] = pal.get(i).intValue();
+        byte[] data = new byte[BLOCKS_PER_SECTION / 2];
+        for (int i = 0; i < stateIds.length; i++) {
+            int meta = stateIds[i] & 15;
+            int half = i >> 1;
+            if ((i & 1) == 0) data[half] = (byte) ((data[half] & 0xF0) | meta);
+            else data[half] = (byte) ((data[half] & 0x0F) | (meta << 4));
+        }
+        NbtNode sec = NbtNode.compound();
+        sec.asMap().put("Palette", NbtNode.intArrayNode(palVals));
+        sec.asMap().put("Blocks", NbtNode.byteArrayNode(idxs));
+        sec.asMap().put("Data", NbtNode.byteArrayNode(data));
+        return sec;
+    }
+
     // ------------------------------------------------------------ helpers
 
     public static int bitsFor(int paletteSize) {
@@ -139,6 +194,20 @@ public class SectionCodec {
         }
         long mask = bits == 64 ? -1L : (1L << bits) - 1;
         return value & mask;
+    }
+
+    /** 写入打包索引（getPacked 的逆操作，跨 long 边界兼容）。 */
+    public static void setPacked(long[] arr, int index, int bits, int value) {
+        int bitIndex = index * bits;
+        int longIndex = bitIndex >>> 6;
+        int offset = bitIndex & 63;
+        long v = value & (bits == 64 ? -1L : (1L << bits) - 1);
+        if (offset + bits <= 64) {
+            arr[longIndex] |= v << offset;
+        } else {
+            arr[longIndex] |= v << offset;
+            arr[longIndex + 1] |= v >>> (64 - offset);
+        }
     }
 
     public static int nibble(byte b, boolean evenIndex) {
