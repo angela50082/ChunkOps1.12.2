@@ -103,6 +103,11 @@ public class SectionCodec {
         sec.asMap().put("Blocks", NbtNode.byteArrayNode(blocks));
         sec.asMap().put("Data", NbtNode.byteArrayNode(data));
         if (add != null) sec.asMap().put("Add", NbtNode.byteArrayNode(add));
+        // 光照默认填充（游戏加载必需：NibbleArray 0 字节会崩——实测）；调用方可覆盖
+        byte[] sky = new byte[BLOCKS_PER_SECTION / 2];
+        java.util.Arrays.fill(sky, (byte) 0xFF);
+        sec.asMap().put("SkyLight", NbtNode.byteArrayNode(sky));
+        sec.asMap().put("BlockLight", NbtNode.byteArrayNode(new byte[BLOCKS_PER_SECTION / 2]));
         return sec;
     }
 

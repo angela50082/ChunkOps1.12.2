@@ -103,7 +103,7 @@ public class Mcops {
                 for (NbtNode sec : sections.asList()) {
                     int[] stateIds = SectionCodec.decode(sec);
                     if (stateIds == null) continue;
-                    sectionsOut.asList().add(encodeSection(stateIds, SectionCodec.sectionY(sec), snap));
+                    sectionsOut.asList().add(encodeSection(stateIds, SectionCodec.sectionY(sec), snap, sec));
                 }
             }
             out.asMap().put("Sections", sectionsOut);
@@ -157,8 +157,8 @@ public class Mcops {
         return out;
     }
 
-    /** section → {Y, Palette:[名称#meta], Blocks:int[4096] 索引} */
-    static NbtNode encodeSection(int[] stateIds, int y, RegistrySnapshot snap) {
+    /** section → {Y, Palette:[名称#meta], Blocks:int[4096] 索引, SkyLight, BlockLight} */
+    static NbtNode encodeSection(int[] stateIds, int y, RegistrySnapshot snap, NbtNode srcSec) {
         Map<Integer, String> idToName = new HashMap<Integer, String>();
         List<String> palette = new ArrayList<String>();
         int[] indices = new int[stateIds.length];
@@ -186,7 +186,24 @@ public class Mcops {
         for (String p : palette) pal.asList().add(NbtNode.stringNode(p));
         sec.asMap().put("Palette", pal);
         sec.asMap().put("Blocks", NbtNode.intArrayNode(indices));
+        // 光照原样保留（游戏加载必需：缺失会导致 NibbleArray 0 字节崩溃——实测）
+        putLight(sec, srcSec, "SkyLight", (byte) 0xFF);
+        putLight(sec, srcSec, "BlockLight", (byte) 0x00);
         return sec;
+    }
+
+    /** 光照数组：源有合法 2048 字节则原样拷贝，否则填默认值（SkyLight=全亮 / BlockLight=空）。 */
+    static void putLight(NbtNode out, NbtNode src, String key, byte fill) {
+        if (src != null) {
+            NbtNode l = src.get(key);
+            if (l != null && l.type == NbtNode.TAG_BYTE_ARRAY && ((byte[]) l.value).length == 2048) {
+                out.asMap().put(key, l);
+                return;
+            }
+        }
+        byte[] d = new byte[2048];
+        java.util.Arrays.fill(d, fill);
+        out.asMap().put(key, NbtNode.byteArrayNode(d));
     }
 
     // ------------------------------------------------------------ import
@@ -307,6 +324,9 @@ public class Mcops {
         if (yNode != null) y = ((Number) yNode.value).intValue();
         NbtNode secOut = SectionCodec.encodeLegacy(stateIds);
         secOut.asMap().put("Y", NbtNode.byteNode((byte) y));
+        // 光照：无则填默认（游戏加载必需——缺失 NibbleArray 0 字节崩溃，实测）
+        putLight(secOut, secIn, "SkyLight", (byte) 0xFF);
+        putLight(secOut, secIn, "BlockLight", (byte) 0x00);
         return secOut;
     }
 
