@@ -156,6 +156,7 @@ public class ChunkOpsEditorScreen extends GuiScreen {
         int maxCz = (int) Math.floor((viewZ + (double) (mapBottom - mapTop) / 2 / ppb) / 16);
         int loadedCount = 0;
         int pendingCount = 0;
+        int exactCount = 0;
         if (currentWorldDir != null) {
             for (int cx = minCx; cx <= maxCx; cx++) {
                 for (int cz = minCz; cz <= maxCz; cz++) {
@@ -170,6 +171,7 @@ public class ChunkOpsEditorScreen extends GuiScreen {
                         this.mc.getTextureManager().bindTexture(loc);
                         drawTexturedQuad(sx, sy, size, size);
                         loadedCount++;
+                        exactCount += tile.exactCols;
                     } else {
                         drawRect(sx, sy, sx + size, sy + size, renderer.pendingColor());
                         pendingCount++;
@@ -218,8 +220,8 @@ public class ChunkOpsEditorScreen extends GuiScreen {
         String name = selectedWorld >= 0 && selectedWorld < worlds.size()
                 ? worlds.get(selectedWorld).getDisplayName() : "（无存档）";
         this.fontRenderer.drawString("存档: " + name, 68, 12, 0xFFFFFF);
-        this.fontRenderer.drawString(String.format("%d 个存档 | 已加载 %d 区块 | 加载中 %d", worlds.size(), loadedCount, pendingCount),
-                220, 12, 0xAAAAAA);
+        this.fontRenderer.drawString(String.format("%d 个存档 | 已加载 %d 区块 | 加载中 %d | 精确层 %d 列",
+                worlds.size(), loadedCount, pendingCount, exactCount), 220, 12, 0xAAAAAA);
 
         // 状态栏
         this.fontRenderer.drawString(String.format("中心: %.0f, %.0f   缩放: %.1f px/方块",

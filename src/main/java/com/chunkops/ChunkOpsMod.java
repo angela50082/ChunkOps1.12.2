@@ -1,9 +1,14 @@
 package com.chunkops;
 
+import com.chunkops.exact.ExactMapCollector;
+import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.fml.common.Loader;
 import net.minecraftforge.fml.common.Mod;
 import net.minecraftforge.fml.common.event.FMLInitializationEvent;
 import net.minecraftforge.fml.common.event.FMLPreInitializationEvent;
+import net.minecraftforge.fml.common.event.FMLServerStoppingEvent;
+import net.minecraftforge.fml.common.eventhandler.EventBus;
+import net.minecraftforge.fml.common.FMLCommonHandler;
 import org.apache.logging.log4j.Logger;
 
 import java.io.File;
@@ -20,6 +25,9 @@ public class ChunkOpsMod {
 
     private static Logger logger;
 
+    /** 精确数据层采集器（P2）：生命周期与客户端一致。 */
+    private static ExactMapCollector exactCollector;
+
     @Mod.EventHandler
     public void preInit(FMLPreInitializationEvent event) {
         logger = event.getModLog();
@@ -35,6 +43,23 @@ public class ChunkOpsMod {
             ChunkOpsExport.export(mcDir);
         } catch (Exception e) {
             logger.error("registry-snapshot 导出失败", e);
+        }
+        // 精确数据层采集器（P2）：ChunkEvent.Load（Forge bus）+ ClientTick 兜底（FML bus）
+        try {
+            exactCollector = new ExactMapCollector();
+            MinecraftForge.EVENT_BUS.register(exactCollector);
+            FMLCommonHandler.instance().bus().register(exactCollector);
+            logger.info("ExactMapCollector registered");
+        } catch (Exception e) {
+            logger.error("ExactMapCollector 注册失败", e);
+        }
+    }
+
+    @Mod.EventHandler
+    public void onServerStopping(FMLServerStoppingEvent event) {
+        if (exactCollector != null) {
+            exactCollector.shutdown();
+            exactCollector = null;
         }
     }
 }

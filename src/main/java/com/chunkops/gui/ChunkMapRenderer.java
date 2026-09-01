@@ -1,5 +1,6 @@
 package com.chunkops.gui;
 
+import com.chunkops.core.ExactMapFile;
 import com.chunkops.core.RegionWriter;
 import com.chunkops.core.SectionCodec;
 import com.chunkops.verify.NbtNode;
@@ -30,10 +31,19 @@ public class ChunkMapRenderer {
 
     private static final int TILE_CACHE_MAX = 16384;   // tile 数据缓存：大存档浏览不驱逐（16MB）
     private static final int TEXTURE_CACHE_MAX = 2048;  // GL 纹理缓存：驱逐后重建很快，不闪烁
+    private static final int EXACT_CACHE_MAX = 64;      // 精确层 region 数据缓存（64×512KB≈32MB）
     private static final int BACKGROUND = 0xFF14181C;
     private static final int PENDING = 0xFF20262C;
 
     private final MapColorCache colors = new MapColorCache();
+
+    /** 精确层（COPM，游戏内采集）region 缓存：文件路径 → 数据。 */
+    private final Map<String, ExactMapFile.ExactRegion> exactRegions =
+            new LinkedHashMap<String, ExactMapFile.ExactRegion>(16, 0.75f, true) {
+                protected boolean removeEldestEntry(Map.Entry<String, ExactMapFile.ExactRegion> eldest) {
+                    return size() > EXACT_CACHE_MAX;
+                }
+            };
 
     private final Map<String, ChunkMapTile> tiles = new LinkedHashMap<String, ChunkMapTile>(256, 0.75f, true) {
         protected boolean removeEldestEntry(Map.Entry<String, ChunkMapTile> eldest) {
@@ -55,9 +65,10 @@ public class ChunkMapRenderer {
         }
     });
 
-    /** 一个 chunk 的 16×16 颜色图。 */
+    /** 一个 chunk 的 16×16 颜色图。exactCols=精确层（游戏内采集）实际列数。 */
     public static class ChunkMapTile {
         public final int[] colors = new int[256];
+        public int exactCols = 0;
     }
 
     static String key(String worldPath, int cx, int cz) {
@@ -72,6 +83,9 @@ public class ChunkMapRenderer {
         }
         tiles.clear();
         textures.clear();
+        synchronized (exactRegions) {
+            exactRegions.clear();
+        }
     }
 
     /**
@@ -147,6 +161,30 @@ public class ChunkMapRenderer {
         return BACKGROUND;
     }
 
+    /**
+     * 精确层 region 数据（COPM，游戏内采集）：saves/&lt;世界名&gt; → gameDir/chunkops/map/&lt;世界名&gt;/0/。
+     * 不存在/不可读返回 null（编辑器回退到文件级取色）。LRU 缓存。
+     */
+    ExactMapFile.ExactRegion exactRegion(File worldDir, int rx, int rz) {
+        File gameDir = worldDir.getParentFile() == null ? null : worldDir.getParentFile().getParentFile();
+        if (gameDir == null || !gameDir.isDirectory()) return null;
+        File f = new File(new File(new File(gameDir, "chunkops/map"), worldDir.getName()), "0");
+        f = new File(f, ExactMapFile.fileName(rx, rz));
+        String path = f.getAbsolutePath();
+        synchronized (exactRegions) {
+            ExactMapFile.ExactRegion r = exactRegions.get(path);
+            if (r != null) return r;
+            try {
+                r = ExactMapFile.read(f);
+            } catch (Exception e) {
+                return null;
+            }
+            if (r == null) return null;
+            exactRegions.put(path, r);
+            return r;
+        }
+    }
+
     // ------------------------------------------------------------ load
 
     /** 后台线程：加载一个 chunk 的 16×16 地表颜色图。 */
@@ -179,10 +217,23 @@ public class ChunkMapRenderer {
             }
             if (secStates.isEmpty()) return null;
 
+            // 精确层（游戏内采集 COPM）：有数据列优先，其余列走文件级取色回退
+            ExactMapFile.ExactRegion exact = exactRegion(worldDir, rx, rz);
+
             ChunkMapTile tile = new ChunkMapTile();
+            int baseX = (cx & 31) * 16;
+            int baseZ = (cz & 31) * 16;
             for (int z = 0; z < 16; z++) {
                 for (int x = 0; x < 16; x++) {
                     int col = z * 16 + x;
+                    if (exact != null) {
+                        int gi = (baseZ + z) * exact.width + (baseX + x);
+                        if (exact.hasData(gi)) {
+                            tile.colors[col] = exact.color[gi];
+                            tile.exactCols++;
+                            continue;
+                        }
+                    }
                     int y = findSurfaceY(secStates, heightMap, col);
                     int stateId = 0;
                     if (y >= 0) {
