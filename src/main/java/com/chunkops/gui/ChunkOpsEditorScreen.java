@@ -23,9 +23,8 @@ import java.util.List;
  */
 public class ChunkOpsEditorScreen extends GuiScreen {
 
-    private static final int BTN_PREV = 1;
-    private static final int BTN_NEXT = 2;
     private static final int BTN_BACK = 3;
+    private static final int BTN_READONLY = 4;
 
     private final List<WorldSummary> worlds = new ArrayList<WorldSummary>();
     private int selectedWorld = -1;
@@ -42,17 +41,9 @@ public class ChunkOpsEditorScreen extends GuiScreen {
     private boolean selecting = false;
     private boolean moving = false;
     private int lastMouseX, lastMouseY;
-    private boolean menuOpen = false;
+    /** 存档下拉菜单（替代左右切换按钮）。 */
+    private boolean worldMenuOpen = false;
     private final java.util.List<String> log = new ArrayList<String>();
-
-    private static final int BTN_MENU_REMOVE = 100;
-    private static final int BTN_MENU_CLEAR = 101;
-    private static final int BTN_MENU_TRIM = 102;
-    private static final int BTN_MENU_STATS = 103;
-    private static final int BTN_MENU_CLOSE = 104;
-    private static final int BTN_MENU_COPY = 105;
-    private static final int BTN_MENU_PASTE = 106;
-    private static final int BTN_READONLY = 4;
 
     private boolean readOnly = false;
     private java.util.Map<Long, byte[]> clipboard = null;
@@ -110,32 +101,6 @@ public class ChunkOpsEditorScreen extends GuiScreen {
         return viewZ + (my - mapCenterY) / zoom;
     }
 
-    private void openMenu(int mx, int my) {
-        closeMenu();
-        menuOpen = true;
-        int bx = Math.max(10, Math.min(this.width - 90, mx));
-        int by = Math.max(34, Math.min(this.height - 160, my));
-        this.buttonList.add(new GuiButton(BTN_MENU_REMOVE, bx, by, 80, 18, "移除区块"));
-        this.buttonList.add(new GuiButton(BTN_MENU_CLEAR, bx, by + 20, 80, 18, "清空区块"));
-        this.buttonList.add(new GuiButton(BTN_MENU_TRIM, bx, by + 40, 80, 18, "剪裁(保留选区)"));
-        this.buttonList.add(new GuiButton(BTN_MENU_STATS, bx, by + 60, 80, 18, "统计选区"));
-        this.buttonList.add(new GuiButton(BTN_MENU_COPY, bx, by + 80, 80, 18, "复制选区"));
-        if (clipboard != null && !clipboard.isEmpty()) {
-            this.buttonList.add(new GuiButton(BTN_MENU_PASTE, bx, by + 100, 80, 18, "粘贴(" + clipboard.size() + ")"));
-        }
-        this.buttonList.add(new GuiButton(BTN_MENU_CLOSE, bx, by + 120, 80, 18, "关闭"));
-    }
-
-    private void closeMenu() {
-        menuOpen = false;
-        java.util.Iterator<GuiButton> it = this.buttonList.iterator();
-        while (it.hasNext()) {
-            int id = it.next().id;
-            // 移除全部菜单按钮（含复制 105 / 粘贴 106）
-            if (id >= BTN_MENU_REMOVE && id <= BTN_MENU_PASTE) it.remove();
-        }
-    }
-
     private void updateWorldDir() {
         if (selectedWorld >= 0 && selectedWorld < worlds.size()) {
             File savesDir = new File(Loader.instance().getConfigDir().getParentFile(), "saves");
@@ -170,10 +135,9 @@ public class ChunkOpsEditorScreen extends GuiScreen {
 
         this.buttonList.clear();
         int y = 6;
-        this.buttonList.add(new GuiButton(BTN_PREV, 6, y, 24, 20, "<"));
-        this.buttonList.add(new GuiButton(BTN_NEXT, 34, y, 24, 20, ">"));
         this.buttonList.add(new GuiButton(BTN_BACK, this.width - 86, y, 80, 20, "返回主菜单"));
         this.buttonList.add(new GuiButton(BTN_READONLY, this.width - 170, y, 80, 20, "只读: 关"));
+        worldMenuOpen = false;
     }
 
     @Override
@@ -294,14 +258,48 @@ public class ChunkOpsEditorScreen extends GuiScreen {
         // 世界信息
         String name = selectedWorld >= 0 && selectedWorld < worlds.size()
                 ? worlds.get(selectedWorld).getDisplayName() : "（无存档）";
-        this.fontRenderer.drawString("存档: " + name, 68, 12, 0xFFFFFF);
+        // 存档下拉按钮（替代 "<" ">" 切换）
+        int wbx = 6, wby = 4, wbw = 214, wbh = 22;
+        boolean wbHover = mouseX >= wbx && mouseX < wbx + wbw && mouseY >= wby && mouseY < wby + wbh;
+        drawRect(wbx, wby, wbx + wbw, wby + wbh, worldMenuOpen || wbHover ? 0xFF2A323C : 0xFF20262C);
+        drawRect(wbx, wby, wbx + wbw, wby + 1, 0xFF3A444E);
+        this.fontRenderer.drawString("存档: " + name, wbx + 8, wby + 7, 0xFFFFFFFF);
+        this.fontRenderer.drawString("▾", wbx + wbw - 16, wby + 7, 0xFFAAAAAA);
+        if (worldMenuOpen) {
+            int rows = Math.min(worlds.size(), 12);
+            int my0 = wby + wbh + 2;
+            int mh = rows * 16 + 4;
+            drawRect(wbx, my0, wbx + wbw + 6, my0 + mh, 0xF0181C24);
+            drawRect(wbx, my0, wbx + wbw + 6, my0 + 1, 0xFF3A444E);
+            drawRect(wbx, my0 + mh - 1, wbx + wbw + 6, my0 + mh, 0xFF3A444E);
+            for (int i = 0; i < rows; i++) {
+                String wname = worlds.get(i).getDisplayName();
+                int ry = my0 + 2 + i * 16;
+                boolean hov = mouseX >= wbx && mouseX < wbx + wbw + 6 && mouseY >= ry && mouseY < ry + 16;
+                if (hov) drawRect(wbx, ry, wbx + wbw + 6, ry + 16, 0xFF2A323C);
+                this.fontRenderer.drawString((i == selectedWorld ? "✔ " : "   ") + wname,
+                        wbx + 6, ry + 4, hov ? 0xFFFFFFFF : 0xFFCCCCCC);
+            }
+        }
         this.fontRenderer.drawString(String.format("%d 个存档 | 已加载 %d 区块 | 加载中 %d | 精确层 %d 列",
-                worlds.size(), loadedCount, pendingCount, exactCount), 220, 12, 0xAAAAAA);
+                worlds.size(), loadedCount, pendingCount, exactCount), 230, 12, 0xAAAAAA);
 
-        // 状态栏
-        this.fontRenderer.drawString(String.format("中心: %.0f, %.0f   缩放: %.1f px/方块",
-                viewX, viewZ, ppb), 6, this.height - 24, 0xAAAAAA);
-        this.fontRenderer.drawString("左键框选 · 中键拖动 · 右键菜单 · 滚轮缩放 · 快捷键 ? · ESC 返回",
+        // 状态栏（左下角：中心 + 鼠标指向区块）
+        String centerStr = String.format("中心: %.0f, %.0f  缩放: %.1f px/方块", viewX, viewZ, ppb);
+        this.fontRenderer.drawString(centerStr, 6, this.height - 24, 0xAAAAAA);
+        int cw = this.fontRenderer.getStringWidth(centerStr);
+        String ptrStr = "";
+        if (mouseX < this.width - PANEL_W && mouseY >= 30 && mouseY < this.height - 30) {
+            int pcx = (int) Math.floor(screenToBlockX(mouseX) / 16);
+            int pcz = (int) Math.floor(screenToBlockZ(mouseY) / 16);
+            int pbx = (int) Math.floor(screenToBlockX(mouseX));
+            int pbz = (int) Math.floor(screenToBlockZ(mouseY));
+            ptrStr = String.format(" | 指向: 区块 (%d, %d) 方块 (%d, %d)", pcx, pcz, pbx, pbz);
+        } else {
+            ptrStr = " | 指向: ---";
+        }
+        this.fontRenderer.drawString(ptrStr, 6 + cw, this.height - 24, 0xFF88CCFF);
+        this.fontRenderer.drawString("左键框选 · 中键拖动 · 右键取消框选 · 滚轮缩放 · 快捷键 ? · ESC 返回",
                 mapCenterX() - 140, this.height - 12, 0x888888);
 
         // ---- 右侧工具面板（自绘控件：按钮/滑块/统计列表/过滤框） ----
@@ -707,39 +705,17 @@ public class ChunkOpsEditorScreen extends GuiScreen {
 
     @Override
     protected void actionPerformed(GuiButton button) {
-        if (button.id == BTN_PREV) {
-            if (!worlds.isEmpty()) selectedWorld = (selectedWorld - 1 + worlds.size()) % worlds.size();
-            updateWorldDir();
-        } else if (button.id == BTN_NEXT) {
-            if (!worlds.isEmpty()) selectedWorld = (selectedWorld + 1) % worlds.size();
-            updateWorldDir();
-        } else if (button.id == BTN_BACK) {
-            closeMenu();
+        if (button.id == BTN_BACK) {
             ChunkOpsGuiHandler.backToMainMenu();
         } else if (button.id == BTN_READONLY) {
             readOnly = !readOnly;
             button.displayString = readOnly ? "只读: 开" : "只读: 关";
             logLine(readOnly ? "已开启只读模式（不写入存档）" : "已关闭只读模式");
-        } else if (button.id == BTN_MENU_REMOVE) {
-            runSelectionOp("remove");
-        } else if (button.id == BTN_MENU_CLEAR) {
-            runSelectionOp("clear");
-        } else if (button.id == BTN_MENU_TRIM) {
-            runSelectionOp("trim");
-        } else if (button.id == BTN_MENU_STATS) {
-            runSelectionOp("stats");
-        } else if (button.id == BTN_MENU_COPY) {
-            runSelectionOp("copy");
-        } else if (button.id == BTN_MENU_PASTE) {
-            runSelectionOp("paste");
-        } else if (button.id == BTN_MENU_CLOSE) {
-            closeMenu();
         }
     }
 
     /** 执行选区操作（含 session.lock 与只读检查）。 */
     private void runSelectionOp(String op) {
-        closeMenu();
         if (currentWorldDir == null) {
             logLine("未选择存档");
             return;
@@ -827,12 +803,34 @@ public class ChunkOpsEditorScreen extends GuiScreen {
     @Override
     protected void mouseClicked(int mouseX, int mouseY, int mouseButton) throws java.io.IOException {
         super.mouseClicked(mouseX, mouseY, mouseButton); // 先处理按钮
-        if (menuOpen) return;
         if (helpOpen) { // 帮助浮层：任意点击关闭
             helpOpen = false;
             return;
         }
+        // 存档下拉菜单（按钮/列表项/外部点击关闭）
+        int wbx = 6, wby = 4, wbw = 214, wbh = 22;
+        if (worldMenuOpen) {
+            boolean inList = mouseX >= wbx && mouseX < wbx + wbw + 6
+                    && mouseY >= wby + wbh + 2 && mouseY < wby + wbh + 2 + Math.min(worlds.size(), 12) * 16 + 4;
+            if (inList) {
+                int idx = (mouseY - (wby + wbh + 2)) / 16;
+                if (idx < worlds.size()) {
+                    selectedWorld = idx;
+                    updateWorldDir();
+                    logLine("切换到存档: " + worlds.get(idx).getDisplayName());
+                }
+            }
+            worldMenuOpen = false;
+            return;
+        }
+        if (mouseX >= wbx && mouseX < wbx + wbw && mouseY >= wby && mouseY < wby + wbh) {
+            worldMenuOpen = true;
+            return;
+        }
         if (panelClick(mouseX, mouseY, mouseButton)) return; // 右侧面板优先
+        if (pastePreview && mouseButton == 0) {
+            // 预览态：左键拖动 = 框选定位（正常框选逻辑，落地位置即目标）
+        }
         if (mouseButton == 0) { // 左键：框选
             selecting = true;
             lastMouseX = mouseX;
@@ -841,14 +839,16 @@ public class ChunkOpsEditorScreen extends GuiScreen {
             moving = true;
             lastMouseX = mouseX;
             lastMouseY = mouseY;
-        } else if (mouseButton == 1) { // 右键：菜单
-            openMenu(mouseX, mouseY);
+        } else if (mouseButton == 1) { // 右键：取消框选
+            if (selMinCx != -1 || selMaxCx != -1) {
+                selMinCx = selMaxCx = selMinCz = selMaxCz = -1;
+                logLine("已取消框选");
+            }
         }
     }
 
     @Override
     protected void mouseClickMove(int mouseX, int mouseY, int clickedMouseButton, long timeSinceLastClick) {
-        if (menuOpen) return;
         if (zoomDrag) { // 缩放滑块拖动
             applyZoomFromSlider(mouseX);
             return;
