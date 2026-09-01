@@ -46,7 +46,8 @@ public class ChunkOpsEditorScreen extends GuiScreen {
     private final java.util.List<String> log = new ArrayList<String>();
 
     private boolean readOnly = false;
-    private java.util.Map<Long, byte[]> clipboard = null;
+    private java.util.Map<Long, byte[]> clipboard = null; // 原始 payload（预览用）
+    private byte[] clipboardNamed = null;                  // 名称化 .mcops（粘贴用——跨模组集安全）
     private int clipOriginCx = 0, clipOriginCz = 0; // 剪贴板源选区左上角
     /** 面板底部同步提示（logLine 时更新）。 */
     private String panelNotice = "";
@@ -756,19 +757,20 @@ public class ChunkOpsEditorScreen extends GuiScreen {
             for (String line : s.split("\n")) logLine(line);
         } else if (op.equals("copy")) {
             clipboard = GuiOps.copyArea(currentWorldDir, selMinCx, selMaxCx, selMinCz, selMaxCz);
+            clipboardNamed = clipboard != null ? GuiOps.exportClipboardNamed(clipboard) : null;
             clipOriginCx = selMinCx;
             clipOriginCz = selMinCz;
-            logLine(clipboard != null ? "已复制 " + clipboard.size() + " 个区块到剪贴板（源 "
+            logLine(clipboard != null ? "已复制 " + clipboard.size() + " 个区块到剪贴板（名称化，源 "
                     + clipOriginCx + "," + clipOriginCz + "）" : "复制失败");
         } else if (op.equals("paste")) {
-            if (clipboard == null || clipboard.isEmpty()) {
+            if (clipboard == null || clipboard.isEmpty() || clipboardNamed == null) {
                 logLine("剪贴板为空（先复制选区）");
                 return;
             }
             if (pastePreview) {
-                // 确认：真正写入（目标 = 预览目标 pasteTarget，单一真源，与预览显示严格一致）
-                logLine(GuiOps.pasteArea(currentWorldDir, clipboard, clipOriginCx, clipOriginCz,
-                        pasteTargetCx, pasteTargetCz));
+                // 确认：名称化导入（按名+meta 反解活注册表，不串块）→ 写入预览目标
+                logLine(GuiOps.pasteAreaNamed(currentWorldDir, clipboardNamed,
+                        clipOriginCx, clipOriginCz, pasteTargetCx, pasteTargetCz));
                 pastePreview = false;
                 previewTiles = null;
                 renderer.clear(); // 数据已变：地图缓存失效重载

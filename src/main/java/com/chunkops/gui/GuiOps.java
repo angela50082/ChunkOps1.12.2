@@ -7,6 +7,7 @@ import com.chunkops.verify.NbtNode;
 import com.chunkops.verify.RegionReader;
 import net.minecraft.block.Block;
 import net.minecraft.util.ResourceLocation;
+import net.minecraft.world.biome.Biome;
 
 import java.io.File;
 import java.util.ArrayList;
@@ -121,6 +122,111 @@ public class GuiOps {
     }
 
     private static String logLastError = "";
+
+    // ------------------------------------------------------------ 名称化剪贴板（跨模组集安全）
+
+    /** 活注册表快照（会话级缓存，构建于运行时注册表——同会话内恒定）。 */
+    private static com.chunkops.core.RegistrySnapshot liveSnap = null;
+
+    public static synchronized com.chunkops.core.RegistrySnapshot liveSnapshot() {
+        if (liveSnap == null) {
+            com.chunkops.core.RegistrySnapshot s = new com.chunkops.core.RegistrySnapshot();
+            for (Block b : Block.REGISTRY) {
+                ResourceLocation rl = Block.REGISTRY.getNameForObject(b);
+                if (rl == null) continue;
+                com.chunkops.core.RegistrySnapshot.BlockEntry e =
+                        new com.chunkops.core.RegistrySnapshot.BlockEntry();
+                e.name = rl.toString();
+                e.id = Block.getIdFromBlock(b);
+                s.blocks.add(e);
+            }
+            for (Biome b : Biome.REGISTRY) {
+                ResourceLocation rl = Biome.REGISTRY.getNameForObject(b);
+                if (rl == null) continue;
+                com.chunkops.core.RegistrySnapshot.BiomeEntry e =
+                        new com.chunkops.core.RegistrySnapshot.BiomeEntry();
+                e.name = rl.toString();
+                e.id = Biome.getIdForBiome(b);
+                s.biomes.add(e);
+            }
+            s.index();
+            liveSnap = s;
+        }
+        return liveSnap;
+    }
+
+    /** 把原始剪贴板 payload 导出为名称化 .mcops（跨模组集安全：方块/生物群系按名+meta 存储）。 */
+    public static byte[] exportClipboardNamed(java.util.Map<Long, byte[]> clipboard) {
+        try {
+            java.util.List<com.chunkops.verify.NbtNode> roots = new java.util.ArrayList<com.chunkops.verify.NbtNode>();
+            for (byte[] payload : clipboard.values()) {
+                roots.add(com.chunkops.core.RegionWriter.unpackChunk(payload));
+            }
+            return com.chunkops.core.Mcops.exportChunks(roots, liveSnapshot(), "", "gui-clipboard");
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /**
+     * 名称化粘贴：.mcops → 活注册表反解（按名+meta 重建数字 ID）→ 平移写入目标区域。
+     * 同会话无损（名称化↔活注册表）；跨模组集缺失方块自动回退并报告。
+     */
+    public static String pasteAreaNamed(File worldDir, byte[] mcops,
+                                        int originCx, int originCz, int targetCx, int targetCz) {
+        if (mcops == null || mcops.length == 0) return "剪贴板为空";
+        try {
+            com.chunkops.core.Mcops.ImportReport report = new com.chunkops.core.Mcops.ImportReport();
+            java.util.List<com.chunkops.verify.NbtNode> roots =
+                    com.chunkops.core.Mcops.importChunks(mcops, liveSnapshot(), report);
+            int n = 0, errors = 0;
+            String lastErr = "";
+            for (com.chunkops.verify.NbtNode root : roots) {
+                try {
+                    com.chunkops.verify.NbtNode level = root.get("Level");
+                    if (level == null) continue;
+                    int srcX = ((Number) level.get("xPos").value).intValue();
+                    int srcZ = ((Number) level.get("zPos").value).intValue();
+                    int dx = srcX - originCx;
+                    int dz = srcZ - originCz;
+                    int cx = targetCx + dx;
+                    int cz = targetCz + dz;
+                    level.asMap().put("xPos", com.chunkops.verify.NbtNode.intNode(cx));
+                    level.asMap().put("zPos", com.chunkops.verify.NbtNode.intNode(cz));
+                    byte[] payload = com.chunkops.core.RegionWriter.packChunk(root);
+                    int rx = Math.floorDiv(cx, 32);
+                    int rz = Math.floorDiv(cz, 32);
+                    File region = new File(new File(worldDir, "region"), "r." + rx + "." + rz + ".mca");
+                    File parent = region.getParentFile();
+                    if (!parent.isDirectory() && !parent.mkdirs()) return "目标缺少 region 目录";
+                    com.chunkops.core.RegionWriter rw = new com.chunkops.core.RegionWriter(region);
+                    rw.setChunk((cz & 31) * 32 + (cx & 31), payload);
+                    rw.write();
+                    n++;
+                } catch (Exception ex) {
+                    errors++;
+                    lastErr = ex.getMessage();
+                }
+            }
+            StringBuilder sb = new StringBuilder();
+            sb.append("粘贴完成: ").append(n).append(" 个区块 → 目标 (").append(targetCx)
+                    .append(",").append(targetCz).append(")");
+            if (report.blocksFallenBack > 0) {
+                sb.append("；缺失方块回退 ").append(report.blocksFallenBack)
+                        .append(" 个（").append(report.missingPalette.size()).append(" 种: ");
+                int cnt = 0;
+                for (java.util.Map.Entry<String, Long> e : report.missingPalette.entrySet()) {
+                    if (cnt++ >= 5) { sb.append("…"); break; }
+                    sb.append(e.getKey()).append("x").append(e.getValue()).append(" ");
+                }
+                sb.append("）");
+            }
+            if (errors > 0) sb.append("；含 ").append(errors).append(" 个失败: ").append(lastErr);
+            return sb.toString();
+        } catch (Exception e) {
+            return "粘贴失败: " + e.getMessage();
+        }
+    }
 
     // ------------------------------------------------------------ stats
 
