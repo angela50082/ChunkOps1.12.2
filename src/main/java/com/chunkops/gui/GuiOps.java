@@ -107,6 +107,70 @@ public class GuiOps {
     // ------------------------------------------------------------ stats
 
     /**
+     * 选区统计（结构版，供 UI 列表）：方块名级计数。
+     * 返回 Object[]{Integer chunks, Long total, Integer unknownTypes, Long unknownCount, List<String[]> entries}
+     * entries[i] = {方块名, 数量, 百分比字符串}（按数量降序，最多 500 条）。
+     */
+    public static Object[] statsAreaList(File worldDir, int minCx, int maxCx, int minCz, int maxCz) {
+        try {
+            Map<String, Long> blockCount = new TreeMap<String, Long>();
+            long total = 0;
+            long unknownTotal = 0;
+            int unknownTypes = 0;
+            int chunks = 0;
+            for (int cx = minCx; cx <= maxCx; cx++) {
+                for (int cz = minCz; cz <= maxCz; cz++) {
+                    int rx = Math.floorDiv(cx, 32);
+                    int rz = Math.floorDiv(cz, 32);
+                    File region = new File(new File(worldDir, "region"), "r." + rx + "." + rz + ".mca");
+                    if (!region.isFile()) continue;
+                    RegionReader rr = new RegionReader(region);
+                    byte[] payload = rr.readChunkData((cz & 31) * 32 + (cx & 31));
+                    if (payload == null) continue;
+                    chunks++;
+                    NbtNode root = RegionWriter.unpackChunk(payload);
+                    NbtNode level = root.get("Level");
+                    if (level == null) continue;
+                    for (NbtNode sec : SectionCodec.sectionsOf(level)) {
+                        int[] stateIds = SectionCodec.decode(sec);
+                        if (stateIds == null) continue;
+                        for (int s : stateIds) {
+                            total++;
+                            if (s == 0) continue;
+                            int id = s >> 4;
+                            ResourceLocation rl = Block.REGISTRY.getNameForObject(Block.getBlockById(id));
+                            if (rl == null) {
+                                unknownTotal++;
+                                continue;
+                            }
+                            String name = rl.toString();
+                            Long c = blockCount.get(name);
+                            blockCount.put(name, c == null ? 1 : c + 1);
+                        }
+                    }
+                }
+            }
+            unknownTypes = 0; // 未知 id 类型数不在此统计（见文本版）
+            List<String[]> sorted = new ArrayList<String[]>();
+            List<Map.Entry<String, Long>> list = new ArrayList<Map.Entry<String, Long>>(blockCount.entrySet());
+            Collections.sort(list, new Comparator<Map.Entry<String, Long>>() {
+                public int compare(Map.Entry<String, Long> a, Map.Entry<String, Long> b) {
+                    return b.getValue().compareTo(a.getValue());
+                }
+            });
+            for (int i = 0; i < Math.min(500, list.size()); i++) {
+                Map.Entry<String, Long> e = list.get(i);
+                sorted.add(new String[]{e.getKey(), String.valueOf(e.getValue()),
+                        String.format("%.2f%%", 100.0 * e.getValue() / Math.max(1, total))});
+            }
+            return new Object[]{Integer.valueOf(chunks), Long.valueOf(total),
+                    Integer.valueOf(unknownTypes), Long.valueOf(unknownTotal), sorted};
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /**
      * 选区统计：解码方块 → 活注册表名称化 → 按 modid 分桶。
      * 返回多行文本（总数 + top 12 modid + 未知 id 数）。
      */

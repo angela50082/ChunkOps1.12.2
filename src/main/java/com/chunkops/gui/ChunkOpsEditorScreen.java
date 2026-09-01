@@ -56,15 +56,44 @@ public class ChunkOpsEditorScreen extends GuiScreen {
 
     private boolean readOnly = false;
     private java.util.Map<Long, byte[]> clipboard = null;
+    /** 面板底部同步提示（logLine 时更新）。 */
+    private String panelNotice = "";
+
+    // ------------------------------------------------------------ 右侧工具面板（功能控件）
+
+    private static final int PANEL_W = 190;
+    // 滑块：zoom = 0.5 * 64^val（对数映射 0.5..32）
+    private double zoomVal = -1; // 初始化为当前 zoom 的反算（initGui 时）
+    private boolean zoomDrag = false;
+    private int zoomSliderX, zoomSliderY, zoomSliderW = 150;
+
+    // 统计面板
+    private java.util.List<String[]> statsEntries = new java.util.ArrayList<String[]>(); // {name,count,pct}
+    private String statsSummary = "统计：先框选，再点「统计」";
+    private int statsSortCol = 1;      // 0=名称 1=数量
+    private boolean statsDesc = true;
+    private int statsScroll = 0;       // 行偏移
+    private String statsFilter = "";   // 已应用的过滤文本
+    private net.minecraft.client.gui.GuiTextField statsBox;
+    private volatile Object[] statsResult = null; // 后台统计结果
+    private boolean statsBusy = false;
+
+    private boolean helpOpen = false;
 
     private void logLine(String s) {
         log.add(s);
         while (log.size() > 6) log.remove(0);
+        panelNotice = s; // 面板同步提示
     }
 
-    /** 屏幕坐标 → 方块坐标（地图区域）。 */
+    /** 地图画布水平中心（右侧面板之外的区域中心）。 */
+    private int mapCenterX() {
+        return (this.width - PANEL_W) / 2;
+    }
+
+    /** 屏幕坐标 → 方块坐标（地图区域，扣除右侧面板）。 */
     private double screenToBlockX(int mx) {
-        return viewX + (mx - this.width / 2) / zoom;
+        return viewX + (mx - mapCenterX()) / zoom;
     }
 
     private double screenToBlockZ(int my) {
@@ -151,9 +180,9 @@ public class ChunkOpsEditorScreen extends GuiScreen {
         int mapCenterY = (mapTop + mapBottom) / 2;
         double ppb = zoom;
 
-        // ---- 2D 地图：可见 chunk 渲染（异步加载 + 纹理） ----
-        int minCx = (int) Math.floor((viewX - (double) this.width / 2 / ppb) / 16);
-        int maxCx = (int) Math.floor((viewX + (double) this.width / 2 / ppb) / 16);
+        // ---- 2D 地图：可见 chunk 渲染（异步加载 + 顶点色批渲染） ----
+        int minCx = (int) Math.floor((viewX - (double) mapCenterX() / ppb) / 16);
+        int maxCx = (int) Math.floor((viewX + (double) mapCenterX() / ppb) / 16);
         int minCz = (int) Math.floor((viewZ - (double) (mapBottom - mapTop) / 2 / ppb) / 16);
         int maxCz = (int) Math.floor((viewZ + (double) (mapBottom - mapTop) / 2 / ppb) / 16);
         int loadedCount = 0;
@@ -164,7 +193,7 @@ public class ChunkOpsEditorScreen extends GuiScreen {
             java.util.List<int[]> visible = new java.util.ArrayList<int[]>(); // [sx, sy, px, py, color]
             for (int cx = minCx; cx <= maxCx; cx++) {
                 for (int cz = minCz; cz <= maxCz; cz++) {
-                    int sx = this.width / 2 + (int) Math.round((cx * 16 - viewX) * ppb);
+                    int sx = mapCenterX() + (int) Math.round((cx * 16 - viewX) * ppb);
                     int sy = mapCenterY + (int) Math.round((cz * 16 - viewZ) * ppb);
                     int size = Math.max(1, (int) Math.round(16 * ppb));
                     ChunkMapRenderer.ChunkMapTile tile = renderer.getOrLoad(currentWorldDir, cx, cz);
@@ -182,31 +211,31 @@ public class ChunkOpsEditorScreen extends GuiScreen {
         }
 
         // ---- 区块网格与坐标轴（画在地图之上） ----
-        int gridMinX = (int) Math.floor(viewX - (double) this.width / 2 / ppb);
-        int gridMaxX = (int) Math.ceil(viewX + (double) this.width / 2 / ppb);
+        int gridMinX = (int) Math.floor(viewX - (double) mapCenterX() / ppb);
+        int gridMaxX = (int) Math.ceil(viewX + (double) mapCenterX() / ppb);
         int gridMinZ = (int) Math.floor(viewZ - (double) (mapBottom - mapTop) / 2 / ppb);
         int gridMaxZ = (int) Math.ceil(viewZ + (double) (mapBottom - mapTop) / 2 / ppb);
         for (int chunkX = (gridMinX >> 4) << 4; chunkX <= gridMaxX; chunkX += 16) {
-            int sx = this.width / 2 + (int) Math.round((chunkX - viewX) * ppb);
-            if (sx >= 0 && sx <= this.width) {
+            int sx = mapCenterX() + (int) Math.round((chunkX - viewX) * ppb);
+            if (sx >= 0 && sx <= this.width - PANEL_W) {
                 drawVerticalLine(sx, mapTop, mapBottom, 0x663A444E);
             }
         }
         for (int chunkZ = (gridMinZ >> 4) << 4; chunkZ <= gridMaxZ; chunkZ += 16) {
             int sy = mapCenterY + (int) Math.round((chunkZ - viewZ) * ppb);
             if (sy >= mapTop && sy <= mapBottom) {
-                drawHorizontalLine(0, this.width, sy, 0x663A444E);
+                drawHorizontalLine(0, this.width - PANEL_W, sy, 0x663A444E);
             }
         }
-        int centerX = this.width / 2;
+        int centerX = mapCenterX();
         drawVerticalLine(centerX, mapTop, mapBottom, 0xFF55616C);
-        drawHorizontalLine(0, this.width, mapCenterY, 0xFF55616C);
+        drawHorizontalLine(0, this.width - PANEL_W, mapCenterY, 0xFF55616C);
 
         // ---- 选区边框 ----
         if (selMinCx != -1 && currentWorldDir != null) {
-            int sx1 = this.width / 2 + (int) Math.round((selMinCx * 16 - viewX) * ppb);
+            int sx1 = mapCenterX() + (int) Math.round((selMinCx * 16 - viewX) * ppb);
             int sy1 = mapCenterY + (int) Math.round((selMinCz * 16 - viewZ) * ppb);
-            int sx2 = this.width / 2 + (int) Math.round(((selMaxCx + 1) * 16 - viewX) * ppb);
+            int sx2 = mapCenterX() + (int) Math.round(((selMaxCx + 1) * 16 - viewX) * ppb);
             int sy2 = mapCenterY + (int) Math.round(((selMaxCz + 1) * 16 - viewZ) * ppb);
             if (sx2 > sx1 && sy2 > sy1) {
                 drawRect(sx1 + 1, sy1 + 1, sx2 - 1, sy2 - 1, 0x22FFFFFF);
@@ -227,19 +256,27 @@ public class ChunkOpsEditorScreen extends GuiScreen {
         // 状态栏
         this.fontRenderer.drawString(String.format("中心: %.0f, %.0f   缩放: %.1f px/方块",
                 viewX, viewZ, ppb), 6, this.height - 24, 0xAAAAAA);
-        this.fontRenderer.drawString("左键框选 · 中键拖动 · 右键菜单 · 滚轮缩放 · ESC 返回",
-                this.width / 2 - 120, this.height - 12, 0x888888);
+        this.fontRenderer.drawString("左键框选 · 中键拖动 · 右键菜单 · 滚轮缩放 · 快捷键 ? · ESC 返回",
+                mapCenterX() - 140, this.height - 12, 0x888888);
 
-        // ---- 色板自检（调试）：红/绿/蓝/湖水蓝参考色，与地图同路径（顶点色渲染）
-        // 已定案：DynamicTexture 在整合包环境被暗化 ×0.533（对照实验 A/B 亮 C 暗），
-        // 地图已改为顶点色批渲染；色板用于确认新路径亮度正确
-        int[] palette = {0xFFFF0000, 0xFF00FF00, 0xFF0000FF, 0xFF0B16B3};
-        int py0 = this.height - 66;
-        for (int i = 0; i < palette.length; i++) {
-            drawRect(this.width - 30 - (palette.length - i) * 24, py0,
-                    this.width - 30 - (palette.length - i) * 24 + 20, py0 + 20, palette[i]);
+        // ---- 右侧工具面板（自绘控件：按钮/滑块/统计列表/过滤框） ----
+        // 异步统计结果应用（主线程）
+        if (statsResult != null) {
+            Object[] r = statsResult;
+            statsResult = null;
+            statsBusy = false;
+            if (r == null) {
+                statsSummary = "统计失败";
+            } else {
+                @SuppressWarnings("unchecked") java.util.List<String[]> list =
+                        (java.util.List<String[]>) r[4];
+                statsEntries = list;
+                statsScroll = 0;
+                statsSummary = String.format("统计: %s 区块 / %s 方块（%d 种）",
+                        r[0], r[1], list.size());
+            }
         }
-        this.fontRenderer.drawString("色板", this.width - 30 - (palette.length) * 24 - 26, py0 + 5, 0xFFFFFF);
+        drawRightPanel(mouseX, mouseY);
 
         // 日志（左侧，半透明背景）
         if (!log.isEmpty()) {
@@ -303,6 +340,284 @@ public class ChunkOpsEditorScreen extends GuiScreen {
             }
             tess.draw();
         }
+    }
+
+    // ------------------------------------------------------------ 右侧工具面板
+
+    private static final String[] TOOL_LABELS = {"移除选区", "清空选区", "剪裁", "统计",
+            "复制", "粘贴", "只读", "帮助"};
+    private static final int BTN_W = 87, BTN_H = 22, BTN_GAP = 5;
+
+    private int panelX() {
+        return this.width - PANEL_W;
+    }
+
+    /** 工具按钮矩形（两列 4 行）。 */
+    private int[] toolRect(int i) {
+        int px = panelX() + (PANEL_W - BTN_W * 2 - BTN_GAP) / 2;
+        int py = 58 + (i / 2) * (BTN_H + BTN_GAP);
+        return new int[]{px + (i % 2) * (BTN_W + BTN_GAP), py, BTN_W, BTN_H};
+    }
+
+    private int sliderY() {
+        return 58 + 4 * (BTN_H + BTN_GAP) + 30;
+    }
+
+    private int statsY() {
+        return sliderY() + 52;
+    }
+
+    private int listX() {
+        return panelX() + 10;
+    }
+
+    private int listY() {
+        return statsY() + 62;
+    }
+
+    private int listW() {
+        return PANEL_W - 22;
+    }
+
+    private void drawRightPanel(int mx, int my) {
+        int px = panelX();
+        int py0 = 30, py1 = this.height - 30;
+        drawRect(px, py0, this.width, py1, 0xEE14181C);
+        drawRect(px, py0, px + 1, py1, 0xFF3A444E);
+        this.fontRenderer.drawString("工具", px + 12, 42, 0xFFFFFFFF);
+        this.fontRenderer.drawString("?", px + PANEL_W - 22, 42, helpOpen ? 0xFFAAFFAA : 0xFF888888);
+
+        // 只读按钮显示状态
+        String lo = TOOL_LABELS[6] + (readOnly ? "开" : "关");
+        for (int i = 0; i < TOOL_LABELS.length; i++) {
+            int[] r = toolRect(i);
+            String label = i == 6 ? lo : TOOL_LABELS[i];
+            boolean hover = mx >= r[0] && mx < r[0] + r[2] && my >= r[1] && my < r[1] + r[3];
+            int bg = hover ? 0xFF2A323C : (i == 6 && readOnly ? 0xFF3A4A2A : 0xFF20262C);
+            drawRect(r[0], r[1], r[0] + r[2], r[1] + r[3], bg);
+            drawRect(r[0], r[1], r[0] + r[2], r[1] + 1, 0xFF3A444E);
+            this.fontRenderer.drawString(label, r[0] + (r[2] - this.fontRenderer.getStringWidth(label)) / 2,
+                    r[1] + (r[3] - 8) / 2, hover ? 0xFFFFFFFF : 0xFFCCCCCC);
+        }
+
+        // ---- 缩放滑块（对数 0.5..32） ----
+        int sy = sliderY();
+        this.fontRenderer.drawString("缩放", px + 12, sy, 0xFFAAAAAA);
+        zoomSliderX = px + 44;
+        zoomSliderY = sy + 5;
+        zoomSliderW = PANEL_W - 84;
+        double v = Math.log(zoom / 0.5) / Math.log(64.0);
+        zoomVal = Math.max(0, Math.min(1, v));
+        drawRect(zoomSliderX, zoomSliderY + 3, zoomSliderX + zoomSliderW, zoomSliderY + 5, 0xFF3A444E);
+        int knob = zoomSliderX + (int) Math.round(zoomVal * zoomSliderW);
+        boolean sHover = mx >= zoomSliderX - 4 && mx <= zoomSliderX + zoomSliderW + 4
+                && my >= zoomSliderY - 2 && my <= zoomSliderY + 10;
+        drawRect(knob - 3, zoomSliderY - 2, knob + 3, zoomSliderY + 10, sHover || zoomDrag ? 0xFFFFFFFF : 0xFFCCCCCC);
+        this.fontRenderer.drawString(String.format("%.2f", zoom), px + PANEL_W - 68, sy, 0xFFCCCCCC);
+
+        // ---- 统计区 ----
+        int sty = statsY();
+        this.fontRenderer.drawString("统计", px + 12, sty, 0xFFAAAAAA);
+        drawRect(listX(), sty + 12, listX() + listW(), sty + 28, 0xFF20262C);
+        this.fontRenderer.drawString("过滤:", listX() + 2, sty + 15, 0xFF888888);
+        if (statsBox == null) {
+            statsBox = new net.minecraft.client.gui.GuiTextField(200, this.fontRenderer,
+                    listX() + 30, sty + 12, listW() - 32, 16);
+        }
+        statsBox.drawTextBox();
+
+        // 表头（点击排序）
+        int hy = sty + 34;
+        drawRect(listX(), hy, listX() + listW(), hy + 11, 0xFF2A323C);
+        String nameH = "名称" + (statsSortCol == 0 ? (statsDesc ? " ▼" : " ▲") : "");
+        String cntH = "数量" + (statsSortCol == 1 ? (statsDesc ? " ▼" : " ▲") : "");
+        this.fontRenderer.drawString(nameH, listX() + 3, hy + 2, 0xFFAAAAAA);
+        this.fontRenderer.drawString(cntH, listX() + listW() - 40, hy + 2, 0xFFAAAAAA);
+
+        // 过滤应用
+        String newFilter = statsBox.getText().trim().toLowerCase();
+        if (!newFilter.equals(statsFilter)) {
+            statsFilter = newFilter;
+            statsScroll = 0;
+        }
+        // 列表（scissor 裁剪 + 滚动条）
+        int ly = hy + 12;
+        int lh = py1 - ly - 4;
+        java.util.List<String[]> filtered = applyStatsFilter();
+        int maxScroll = Math.max(0, filtered.size() - lh / 11);
+        if (statsScroll > maxScroll) statsScroll = maxScroll;
+        if (lh > 16) {
+            // 行渲染按可视行数截断（不越界），无需 scissor（1.12.2 无此 API）
+            for (int i = 0; i < lh / 11; i++) {
+                int idx = statsScroll + i;
+                if (idx >= filtered.size()) break;
+                String[] e = filtered.get(idx);
+                int rowY = ly + i * 11;
+                boolean rowHover = mx >= listX() && mx < listX() + listW()
+                        && my >= rowY && my < rowY + 11;
+                if (rowHover) drawRect(listX(), rowY, listX() + listW(), rowY + 11, 0x22FFFFFF);
+                String name = e[0];
+                if (this.fontRenderer.getStringWidth(name) > listW() - 48) {
+                    name = name.substring(0, Math.max(1, name.length() - 2)) + "…";
+                }
+                this.fontRenderer.drawString(name, listX() + 3, rowY + 2, 0xFFD0D0D0);
+                this.fontRenderer.drawString(e[1], listX() + listW() - 8
+                        - this.fontRenderer.getStringWidth(e[1]), rowY + 2, 0xFFA0E0A0);
+            }
+            // 滚动条
+            if (maxScroll > 0) {
+                drawRect(listX() + listW() + 2, hy, listX() + listW() + 5, py1 - 8, 0xFF2A323C);
+                int trackH = py1 - 8 - hy;
+                int visible = Math.max(1, lh / 11);
+                int barH = Math.max(14, trackH * visible / Math.max(1, filtered.size()));
+                int barY = hy + (int) ((double) statsScroll / Math.max(1, maxScroll) * (trackH - barH));
+                drawRect(listX() + listW() + 2, barY, listX() + listW() + 5, barY + barH, 0xFF888888);
+            }
+        }
+        this.fontRenderer.drawString(statsSummary, px + 10, py1 - 12, 0xFF888888);
+
+        // 帮助浮层
+        if (helpOpen) drawHelpOverlay();
+    }
+
+    /** 应用过滤+排序，返回显示列表（重算缓存）。 */
+    private java.util.List<String[]> applyStatsFilter() {
+        java.util.List<String[]> filtered = new java.util.ArrayList<String[]>();
+        for (String[] e : statsEntries) {
+            if (statsFilter.isEmpty() || e[0].toLowerCase().contains(statsFilter)) filtered.add(e);
+        }
+        java.util.Collections.sort(filtered, new java.util.Comparator<String[]>() {
+            public int compare(String[] a, String[] b) {
+                if (statsSortCol == 0) {
+                    int c = a[0].compareTo(b[0]);
+                    return statsDesc ? -c : c;
+                }
+                long av = Long.parseLong(a[1]), bv = Long.parseLong(b[1]);
+                int c = Long.compare(av, bv);
+                return statsDesc ? -c : c;
+            }
+        });
+        return filtered;
+    }
+
+    /** 面板鼠标点击处理；返回 true 表示已消费。 */
+    private boolean panelClick(int mx, int my, int button) {
+        if (mx < panelX()) return false;
+        if (button != 0) return true; // 面板区域右键/中键：消费（不弹地图菜单）
+        if (helpOpen) {
+            helpOpen = false;
+            return true;
+        }
+        if (button == 0) {
+            for (int i = 0; i < TOOL_LABELS.length; i++) {
+                int[] r = toolRect(i);
+                if (mx >= r[0] && mx < r[0] + r[2] && my >= r[1] && my < r[1] + r[3]) {
+                    switch (i) {
+                        case 0: runSelectionOp("remove"); break;
+                        case 1: runSelectionOp("clear"); break;
+                        case 2: runSelectionOp("trim"); break;
+                        case 3: runStats(); break;
+                        case 4: runSelectionOp("copy"); break;
+                        case 5: runSelectionOp("paste"); break;
+                        case 6: readOnly = !readOnly; logLine("只读: " + (readOnly ? "开" : "关")); break;
+                        case 7: helpOpen = true; break;
+                    }
+                    return true;
+                }
+            }
+            // 缩放滑块
+            if (mx >= zoomSliderX - 6 && mx <= zoomSliderX + zoomSliderW + 6
+                    && my >= zoomSliderY - 4 && my <= zoomSliderY + 12) {
+                zoomDrag = true;
+                applyZoomFromSlider(mx);
+                return true;
+            }
+            // 统计列表表头（排序切换）
+            int sty = statsY();
+            int hy = sty + 34;
+            if (my >= hy && my < hy + 11 && mx >= listX() && mx < listX() + listW()) {
+                int col = mx > listX() + listW() - 46 ? 1 : 0;
+                if (statsSortCol == col) statsDesc = !statsDesc;
+                else { statsSortCol = col; statsDesc = true; }
+                return true;
+            }
+            // 过滤框
+            if (statsBox != null && statsBox.mouseClicked(mx, my, button)) {
+                if (mx >= listX() && mx <= listX() + listW()
+                        && my >= sty + 12 && my <= sty + 28) return true;
+            }
+        }
+        return false;
+    }
+
+    private void applyZoomFromSlider(int mx) {
+        double v = (mx - zoomSliderX) / (double) Math.max(1, zoomSliderW);
+        v = Math.max(0, Math.min(1, v));
+        zoom = 0.5 * Math.pow(64.0, v);
+    }
+
+    /** 面板滚轮处理；返回 true 表示已消费（统计列表滚动）。 */
+    private boolean panelWheel(int dWheel, int mx, int my) {
+        if (mx < panelX()) return false;
+        int sty = statsY();
+        int hy = sty + 34;
+        int ly = hy + 12;
+        int py1 = this.height - 30;
+        int lh = py1 - ly - 4;
+        java.util.List<String[]> filtered = applyStatsFilter();
+        int maxScroll = Math.max(0, filtered.size() - lh / 11);
+        if (my >= ly && my <= py1 && lh > 16 && maxScroll > 0) {
+            statsScroll = Math.max(0, Math.min(maxScroll, statsScroll - dWheel / 120 * 3));
+            return true;
+        }
+        return false;
+    }
+
+    /** 后台统计选区（异步，防大选区卡帧）。 */
+    private void runStats() {
+        if (currentWorldDir == null || selMinCx == -1) {
+            logLine("请先框选区块，再点「统计」");
+            return;
+        }
+        if (statsBusy) return;
+        statsBusy = true;
+        statsSummary = "统计中…（" + (selMaxCx - selMinCx + 1) + "x"
+                + (selMaxCz - selMinCz + 1) + " 区块）";
+        final File wd = currentWorldDir;
+        final int x1 = selMinCx, x2 = selMaxCx, z1 = selMinCz, z2 = selMaxCz;
+        Thread t = new Thread(new Runnable() {
+            public void run() {
+                statsResult = GuiOps.statsAreaList(wd, x1, x2, z1, z2);
+            }
+        }, "chunkops-stats");
+        t.setDaemon(true);
+        t.start();
+    }
+
+    private void drawHelpOverlay() {
+        net.minecraft.client.renderer.GlStateManager.color(1.0F, 1.0F, 1.0F, 1.0F);
+        int x = mapCenterX() - 210, y = 60, w = 420, h = 300;
+        drawRect(x, y, x + w, y + h, 0xF0000000);
+        drawRect(x, y, x + w, y + 1, 0xFF3A444E);
+        this.fontRenderer.drawString("快捷键 / 操作", x + 16, y + 10, 0xFFFFFFFF);
+        String[] lines = {
+                "左键拖动    框选区块",
+                "中键拖动    移动视图",
+                "右键/滚轮  菜单 / 缩放",
+                "R           移除选区",
+                "C           清空选区",
+                "T           剪裁(保留选区)",
+                "S           统计选区",
+                "Ctrl+C/V    复制 / 粘贴",
+                "Ctrl+滚轮   缩放地图",
+                "ESC         返回主菜单",
+        };
+        int ly = y + 30;
+        for (String s : lines) {
+            this.fontRenderer.drawString(s, x + 20, ly, 0xFFCCCCCC);
+            ly += 15;
+        }
+        this.fontRenderer.drawString("点击任意处关闭", x + 16, y + h - 20, 0xFF888888);
     }
 
     @Override
@@ -387,19 +702,14 @@ public class ChunkOpsEditorScreen extends GuiScreen {
     }
 
     @Override
-    public void handleMouseInput() throws java.io.IOException {
-        int dWheel = org.lwjgl.input.Mouse.getEventDWheel();
-        if (dWheel != 0) {
-            double factor = dWheel > 0 ? 1.25 : 0.8;
-            zoom = Math.max(0.5, Math.min(32.0, zoom * factor));
-        }
-        super.handleMouseInput();
-    }
-
-    @Override
     protected void mouseClicked(int mouseX, int mouseY, int mouseButton) throws java.io.IOException {
         super.mouseClicked(mouseX, mouseY, mouseButton); // 先处理按钮
         if (menuOpen) return;
+        if (helpOpen) { // 帮助浮层：任意点击关闭
+            helpOpen = false;
+            return;
+        }
+        if (panelClick(mouseX, mouseY, mouseButton)) return; // 右侧面板优先
         if (mouseButton == 0) { // 左键：框选
             selecting = true;
             lastMouseX = mouseX;
@@ -416,6 +726,10 @@ public class ChunkOpsEditorScreen extends GuiScreen {
     @Override
     protected void mouseClickMove(int mouseX, int mouseY, int clickedMouseButton, long timeSinceLastClick) {
         if (menuOpen) return;
+        if (zoomDrag) { // 缩放滑块拖动
+            applyZoomFromSlider(mouseX);
+            return;
+        }
         if (selecting) {
             int cx1 = (int) Math.floor(screenToBlockX(lastMouseX) / 16);
             int cz1 = (int) Math.floor(screenToBlockZ(lastMouseY) / 16);
@@ -443,13 +757,63 @@ public class ChunkOpsEditorScreen extends GuiScreen {
             }
         }
         moving = false;
+        zoomDrag = false;
         super.mouseReleased(mouseX, mouseY, state);
     }
 
     @Override
+    public void handleMouseInput() throws java.io.IOException {
+        int dWheel = org.lwjgl.input.Mouse.getEventDWheel();
+        if (dWheel != 0) {
+            int mx = org.lwjgl.input.Mouse.getEventX() * this.width / this.mc.displayWidth;
+            int my = this.height - org.lwjgl.input.Mouse.getEventY() * this.height / this.mc.displayHeight - 1;
+            if (panelWheel(dWheel, mx, my)) {
+                super.handleMouseInput();
+                return;
+            }
+            double factor = dWheel > 0 ? 1.25 : 0.8;
+            zoom = Math.max(0.5, Math.min(32.0, zoom * factor));
+        }
+        super.handleMouseInput();
+    }
+
+    @Override
     protected void keyTyped(char typedChar, int keyCode) throws java.io.IOException {
+        // 统计过滤框聚焦时优先输入
+        if (statsBox != null && statsBox.isFocused()) {
+            if (statsBox.textboxKeyTyped(typedChar, keyCode)) return;
+            super.keyTyped(typedChar, keyCode);
+            return;
+        }
         if (keyCode == 1) { // ESC
             ChunkOpsGuiHandler.backToMainMenu();
+            return;
+        }
+        boolean ctrl = org.lwjgl.input.Keyboard.isKeyDown(org.lwjgl.input.Keyboard.KEY_LCONTROL)
+                || org.lwjgl.input.Keyboard.isKeyDown(org.lwjgl.input.Keyboard.KEY_RCONTROL);
+        switch (keyCode) {
+            case org.lwjgl.input.Keyboard.KEY_R:
+                if (!ctrl) { runSelectionOp("remove"); return; }
+                break;
+            case org.lwjgl.input.Keyboard.KEY_C:
+                if (ctrl) { runSelectionOp("copy"); return; }
+                runSelectionOp("clear");
+                return;
+            case org.lwjgl.input.Keyboard.KEY_V:
+                if (ctrl) { runSelectionOp("paste"); return; }
+                break;
+            case org.lwjgl.input.Keyboard.KEY_T:
+                runSelectionOp("trim");
+                return;
+            case org.lwjgl.input.Keyboard.KEY_S:
+                runStats();
+                return;
+            case org.lwjgl.input.Keyboard.KEY_F1:
+                helpOpen = true;
+                return;
+        }
+        if (typedChar == '?' || typedChar == '/') {
+            helpOpen = true;
             return;
         }
         super.keyTyped(typedChar, keyCode);
