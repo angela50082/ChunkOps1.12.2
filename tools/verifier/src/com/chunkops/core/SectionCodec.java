@@ -83,6 +83,16 @@ public class SectionCodec {
 
     // ------------------------------------------------------------ encode
 
+    /**
+     * 按世界格式编码 section：jeid=true → JEID palette（Blocks=索引+Palette int[]，必须的——JEID 的
+     * reid mixin 读取时把 Blocks 一律按 palette 索引解释，无 legacy 分支，写 legacy 会越界崩溃，实测）；
+     * jeid=false → legacy（id>4095 自动转 palette）。
+     */
+    public static NbtNode encodeSection(int[] stateIds, boolean jeid) {
+        if (jeid) return encodePalette(stateIds);
+        return encodeLegacy(stateIds);
+    }
+
     /** 由 stateId 数组编码为 section：存在 id>0xFFF 方块时用 palette（JEID 兼容），否则 legacy 数组。 */
     public static NbtNode encodeLegacy(int[] stateIds) {
         for (int s : stateIds) {

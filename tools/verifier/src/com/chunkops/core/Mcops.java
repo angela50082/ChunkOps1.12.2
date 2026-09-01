@@ -210,8 +210,10 @@ public class Mcops {
 
     /**
      * 导入 .mcops 字节 → chunk NBT 根节点列表（经目标快照重映射回数字 ID）。
+     * @param jeid 目标世界是否 JEID 格式（true=全部 section 写 JEID palette，false=legacy/自动）
      */
-    public static List<NbtNode> importChunks(byte[] data, RegistrySnapshot snap, ImportReport report) throws IOException {
+    public static List<NbtNode> importChunks(byte[] data, RegistrySnapshot snap, ImportReport report,
+                                             boolean jeid) throws IOException {
         List<NbtNode> result = new ArrayList<NbtNode>();
         NbtNode root;
         try {
@@ -225,12 +227,17 @@ public class Mcops {
             throw new IOException("mcops 缺少 Chunks 列表");
         }
         for (NbtNode c : chunks.asList()) {
-            result.add(importChunk(c, snap, report));
+            result.add(importChunk(c, snap, report, jeid));
         }
         return result;
     }
 
-    static NbtNode importChunk(NbtNode mc, RegistrySnapshot snap, ImportReport report) {
+    /** 兼容旧调用（非 JEID）。 */
+    public static List<NbtNode> importChunks(byte[] data, RegistrySnapshot snap, ImportReport report) throws IOException {
+        return importChunks(data, snap, report, false);
+    }
+
+    static NbtNode importChunk(NbtNode mc, RegistrySnapshot snap, ImportReport report, boolean jeid) {
         NbtNode chunkRoot = NbtNode.compound();
         chunkRoot.asMap().put("DataVersion", NbtNode.intNode(1343));
         NbtNode level = NbtNode.compound();
@@ -248,7 +255,7 @@ public class Mcops {
             NbtNode sectionsOut = NbtNode.list();
             sectionsOut.listElemType = NbtNode.TAG_COMPOUND;
             for (NbtNode secIn : sectionsIn.asList()) {
-                NbtNode secOut = decodeSection(secIn, snap, report);
+                NbtNode secOut = decodeSection(secIn, snap, report, jeid);
                 if (secOut != null) sectionsOut.asList().add(secOut);
             }
             level.asMap().put("Sections", sectionsOut);
@@ -302,7 +309,7 @@ public class Mcops {
         return chunkRoot;
     }
 
-    static NbtNode decodeSection(NbtNode secIn, RegistrySnapshot snap, ImportReport report) {
+    static NbtNode decodeSection(NbtNode secIn, RegistrySnapshot snap, ImportReport report, boolean jeid) {
         NbtNode palIn = secIn.get("Palette");
         NbtNode blocksIn = secIn.get("Blocks");
         if (palIn == null || blocksIn == null) return null;
@@ -322,7 +329,8 @@ public class Mcops {
         int y = 0;
         NbtNode yNode = secIn.get("Y");
         if (yNode != null) y = ((Number) yNode.value).intValue();
-        NbtNode secOut = SectionCodec.encodeLegacy(stateIds);
+        // jeid=true → JEID palette（Blocks=索引+Palette int[]）；否则 legacy（id>4095 自动 palette）
+        NbtNode secOut = jeid ? SectionCodec.encodePalette(stateIds) : SectionCodec.encodeLegacy(stateIds);
         secOut.asMap().put("Y", NbtNode.byteNode((byte) y));
         // 光照：无则填默认（游戏加载必需——缺失 NibbleArray 0 字节崩溃，实测）
         putLight(secOut, secIn, "SkyLight", (byte) 0xFF);

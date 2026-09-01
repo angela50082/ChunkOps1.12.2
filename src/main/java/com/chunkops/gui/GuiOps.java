@@ -123,6 +123,34 @@ public class GuiOps {
 
     private static String logLastError = "";
 
+    /** 世界格式检测：读任一 region 的任一 section，若 Palette 为 int[] → JEID 索引格式。 */
+    private static boolean isJeidWorld(File worldDir) {
+        File regDir = new File(worldDir, "region");
+        if (!regDir.isDirectory()) return false;
+        File[] files = regDir.listFiles();
+        if (files == null) return false;
+        for (File f : files) {
+            if (!f.getName().endsWith(".mca")) continue;
+            try {
+                com.chunkops.verify.RegionReader rr = new com.chunkops.verify.RegionReader(f);
+                for (int i = 0; i < 1024; i++) {
+                    byte[] payload = rr.readChunkData(i);
+                    if (payload == null) continue;
+                    com.chunkops.verify.NbtNode root = com.chunkops.core.RegionWriter.unpackChunk(payload);
+                    com.chunkops.verify.NbtNode level = root.get("Level");
+                    if (level == null) continue;
+                    for (com.chunkops.verify.NbtNode sec : com.chunkops.core.SectionCodec.sectionsOf(level)) {
+                        com.chunkops.verify.NbtNode pal = sec.get("Palette");
+                        if (pal != null) return pal.value instanceof int[];
+                    }
+                }
+            } catch (Exception ignored) {
+                // 单文件读取失败：尝试下一个
+            }
+        }
+        return false;
+    }
+
     // ------------------------------------------------------------ 名称化剪贴板（跨模组集安全）
 
     /** 活注册表快照（会话级缓存，构建于运行时注册表——同会话内恒定）。 */
@@ -170,15 +198,18 @@ public class GuiOps {
 
     /**
      * 名称化粘贴：.mcops → 活注册表反解（按名+meta 重建数字 ID）→ 平移写入目标区域。
+     * 目标世界自动检测 JEID 格式（写入 JEID palette；JEID 的 reid mixin 不是 legacy 分支，
+     * 写 legacy 会 palette 越界崩溃，实测定案）。
      * 同会话无损（名称化↔活注册表）；跨模组集缺失方块自动回退并报告。
      */
     public static String pasteAreaNamed(File worldDir, byte[] mcops,
                                         int originCx, int originCz, int targetCx, int targetCz) {
         if (mcops == null || mcops.length == 0) return "剪贴板为空";
         try {
+            boolean jeid = isJeidWorld(worldDir);
             com.chunkops.core.Mcops.ImportReport report = new com.chunkops.core.Mcops.ImportReport();
             java.util.List<com.chunkops.verify.NbtNode> roots =
-                    com.chunkops.core.Mcops.importChunks(mcops, liveSnapshot(), report);
+                    com.chunkops.core.Mcops.importChunks(mcops, liveSnapshot(), report, jeid);
             int n = 0, errors = 0;
             String lastErr = "";
             for (com.chunkops.verify.NbtNode root : roots) {
