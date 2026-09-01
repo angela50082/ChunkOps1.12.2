@@ -139,6 +139,8 @@ public class ChunkOpsEditorScreen extends GuiScreen {
 
     @Override
     public void drawScreen(int mouseX, int mouseY, float partialTicks) {
+        // GL 状态防御：确保无残留 color/alpha 影响后续纹理渲染
+        net.minecraft.client.renderer.GlStateManager.color(1.0F, 1.0F, 1.0F, 1.0F);
         // 背景
         drawRect(0, 0, this.width, this.height, 0xFF14181C);
         drawRect(0, 0, this.width, 30, 0xFF20262C);
@@ -240,6 +242,16 @@ public class ChunkOpsEditorScreen extends GuiScreen {
             drawTexturedQuad(this.width - 30 - (palette.length - i) * 24, py0, 20, 20);
         }
         this.fontRenderer.drawString("色板", this.width - 30 - (palette.length) * 24 - 26, py0 + 5, 0xFFFFFF);
+
+        // ---- 渲染对照实验（定位"夜间模式"暗化）：A=drawRect 纯色(非纹理) / B=vanilla 方块纹理 ----
+        // A(红块, drawRect) 亮 + B(石头纹理) 亮 + 色板(哑光 DynamicTexture) 暗 => 只 DynamicTexture 暗化
+        // A 暗 + B 暗 => 渲染管线整体暗化（光影 shader 后处理/系统级）→ 排查环境
+        net.minecraft.client.renderer.GlStateManager.color(1.0F, 1.0F, 1.0F, 1.0F);
+        drawRect(this.width - 232, py0, this.width - 196, py0 + 36, 0xFFFF0000);
+        this.mc.getRenderItem().renderItemIntoGUI(
+                new net.minecraft.item.ItemStack(net.minecraft.init.Blocks.STONE),
+                this.width - 190, py0 + 8);
+        this.fontRenderer.drawString("对照", this.width - 232, py0 + 42, 0xFFFFFF);
 
         // 日志（左侧，半透明背景）
         if (!log.isEmpty()) {
