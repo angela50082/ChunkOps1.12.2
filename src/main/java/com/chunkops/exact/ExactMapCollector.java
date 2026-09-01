@@ -42,12 +42,16 @@ public class ExactMapCollector {
 
     private static final Logger LOG = LogManager.getLogger(ChunkOpsMod.MODID);
 
-    private static final int TICK_INTERVAL = 40;
+    /** 扫描间隔（tick）。10 tick ≈ 0.5s：快速移动/飞行时不错过加载中的 chunk。 */
+    private static final int TICK_INTERVAL = 10;
     private static final int MAX_QUEUE = 4096;
     /** 防重集合上限（超限清空，重采为幂等覆盖写）。 */
     private static final int COLLECTED_MAX = 200000;
 
-    private final ConcurrentHashMap<Long, Boolean> collected = new ConcurrentHashMap<Long, Boolean>();
+    /** 已完成采集（key=世界#维度#cx,cz；成功写盘才标记）。 */
+    private final ConcurrentHashMap<String, Boolean> collected = new ConcurrentHashMap<String, Boolean>();
+    /** 已入队/采集中（防重复入队；完成后移除）。 */
+    private final java.util.Set<String> pendingKeys = ConcurrentHashMap.newKeySet();
     private final LinkedBlockingQueue<Task> queue = new LinkedBlockingQueue<Task>();
     private final ExecutorService workers;
     private final AtomicInteger tickCounter = new AtomicInteger();
@@ -92,13 +96,14 @@ public class ExactMapCollector {
         if (mc.getIntegratedServer() == null) return; // 仅单人世界（服务器存档在远端，采集无意义）
         int cx = mc.player.chunkCoordX;
         int cz = mc.player.chunkCoordZ;
-        int r = 8 + Math.min(8, mc.gameSettings.renderDistanceChunks); // 玩家常到范围的一圈
+        // 覆盖加载半径（+2 余量），飞行/快速移动不错过
+        int r = mc.gameSettings.renderDistanceChunks + 2;
         for (int dz = -r; dz <= r; dz++) {
             for (int dx = -r; dx <= r; dx++) {
                 int wx = cx + dx;
                 int wz = cz + dz;
-                long key = chunkKey(world.provider.getDimension(), wx, wz);
-                if (collected.containsKey(key)) continue;
+                String key = keyFor(world, wx, wz);
+                if (collected.containsKey(key) || pendingKeys.contains(key)) continue;
                 try {
                     net.minecraft.world.chunk.IChunkProvider prov = world.getChunkProvider();
                     if (prov != null && prov.getLoadedChunk(wx, wz) != null) offer(world, wx, wz);
@@ -111,17 +116,35 @@ public class ExactMapCollector {
 
     // ------------------------------------------------------------ 入队
 
+    /** 入队（去重由 pendingKeys 保证；不标记完成——完成以写盘成功为准，失败可重试）。 */
     private void offer(WorldClient world, int cx, int cz) {
-        long key = chunkKey(world.provider.getDimension(), cx, cz);
-        if (collected.putIfAbsent(key, Boolean.TRUE) != null) return;
-        if (collected.size() > COLLECTED_MAX) collected.clear();
-        if (!queue.offer(new Task(world, cx, cz))) {
-            collected.remove(key); // 队列满：允许下次重试
+        String key = keyFor(world, cx, cz);
+        if (collected.containsKey(key)) return;
+        if (!pendingKeys.add(key)) return; // 已入队/采集中
+        if (!queue.offer(new Task(world, cx, cz, key))) {
+            pendingKeys.remove(key); // 队列满：允许下次重试
         }
     }
 
-    private static long chunkKey(int dim, int cx, int cz) {
-        return ((long) (dim & 0xFFFF) << 48) | ((long) (cx & 0xFFFFFF) << 24) | (cz & 0xFFFFFF);
+    /** 采集键：世界名#维度#chunk坐标（跨世界隔离，避免换世界同坐标被跳过）。 */
+    private static String keyFor(World world, int cx, int cz) {
+        return worldNameOf(world) + "#" + world.provider.getDimension() + "#" + cx + "," + cz;
+    }
+
+    /** 世界名 = 集成服务器 WorldServer 保存目录名（与编辑器 reads saves/<名> 对齐）。 */
+    private static String worldNameOf(World world) {
+        try {
+            Minecraft mc = Minecraft.getMinecraft();
+            if (mc.getIntegratedServer() != null) {
+                WorldServer sw = mc.getIntegratedServer().getWorld(world.provider.getDimension());
+                if (sw != null && sw.getSaveHandler().getWorldDirectory() != null) {
+                    return sw.getSaveHandler().getWorldDirectory().getName();
+                }
+            }
+        } catch (Exception ignored) {
+            // 不可得时用 world
+        }
+        return "world";
     }
 
     // ------------------------------------------------------------ 采集
@@ -129,11 +152,13 @@ public class ExactMapCollector {
     private static class Task {
         final WorldClient world;
         final int cx, cz;
+        final String key;
 
-        Task(WorldClient world, int cx, int cz) {
+        Task(WorldClient world, int cx, int cz, String key) {
             this.world = world;
             this.cx = cx;
             this.cz = cz;
+            this.key = key;
         }
     }
 
@@ -143,9 +168,11 @@ public class ExactMapCollector {
                 try {
                     Task t = queue.take();
                     try {
-                        collect(t.world, t.cx, t.cz);
+                        collect(t.world, t.cx, t.cz, t.key);
                     } catch (Exception e) {
-                        LOG.debug("exact collect failed at " + t.cx + "," + t.cz + ": " + e.getMessage());
+                        LOG.debug("exact collect exception at " + t.cx + "," + t.cz + ": " + e.getMessage());
+                    } finally {
+                        pendingKeys.remove(t.key); // 无论成败释放（失败不标记完成 → 可重试）
                     }
                 } catch (InterruptedException e) {
                     return;
@@ -156,13 +183,16 @@ public class ExactMapCollector {
 
     // ------------------------------------------------------------ 核心
 
-    /** 采集一个 chunk：扫描每列地表 → 取色/取名 → 合并写回 region 的 .dat。 */
-    void collect(World world, int cx, int cz) {
-        if (world == null) return;
+    /** 采集一个 chunk：扫描每列地表 → 取色/取名 → 合并写回 region 的 .dat。成功才标记完成。 */
+    void collect(World world, int cx, int cz, String key) {
+        if (world == null) return; // key 未标记 → 可重试
         try {
-            if (Minecraft.getMinecraft().getIntegratedServer() == null) return; // 仅单人世界
+            if (Minecraft.getMinecraft().getIntegratedServer() == null) {
+                collected.put(key, Boolean.TRUE); // 多人/无存档：放弃采集（标记完成避免反复排队）
+                return;
+            }
             Chunk chunk = world.getChunk(cx, cz);
-            if (chunk == null || !chunk.isLoaded()) return;
+            if (chunk == null || !chunk.isLoaded()) return; // 已卸载：不标记 → 下次加载重采
             int rx = Math.floorDiv(cx, 32);
             int rz = Math.floorDiv(cz, 32);
             File file = dataFile(world, rx, rz);
@@ -213,25 +243,17 @@ public class ExactMapCollector {
                 }
                 ExactMapFile.write(file, reg);
             }
+            collected.put(key, Boolean.TRUE); // 写盘成功 → 完成
+            if (collected.size() > COLLECTED_MAX) collected.clear();
         } catch (Exception e) {
             LOG.debug("exact collect exception at " + cx + "," + cz + ": " + e.getMessage());
+            // 失败不标记 → pendingKeys 已释放，下次加载/扫描重采
         }
     }
 
     private static File dataFile(World world, int rx, int rz) {
         File gameDir = Minecraft.getMinecraft().gameDir;
-        String worldName = "world";
-        try {
-            Minecraft mc = Minecraft.getMinecraft();
-            if (mc.getIntegratedServer() != null) {
-                WorldServer sw = mc.getIntegratedServer().getWorld(world.provider.getDimension());
-                if (sw != null && sw.getSaveHandler().getWorldDirectory() != null) {
-                    worldName = sw.getSaveHandler().getWorldDirectory().getName();
-                }
-            }
-        } catch (Exception ignored) {
-            // 世界目录不可得时用 world
-        }
+        String worldName = worldNameOf(world);
         File dimDir;
         try {
             dimDir = new File(new File(new File(gameDir, "chunkops/map"), worldName),
