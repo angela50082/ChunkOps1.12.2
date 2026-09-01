@@ -224,49 +224,75 @@ public class ChunkMapRenderer {
 
             // 精确层（游戏内采集 COPM）：有数据列优先，其余列走文件级取色回退
             ExactMapFile.ExactRegion exact = exactRegion(worldDir, rx, rz);
-
-            ChunkMapTile tile = new ChunkMapTile();
-            int baseX = (cx & 31) * 16;
-            int baseZ = (cz & 31) * 16;
-            for (int z = 0; z < 16; z++) {
-                for (int x = 0; x < 16; x++) {
-                    int col = z * 16 + x;
-                    if (exact != null) {
-                        // 越界防御：旧版 256 宽文件（尺寸 bug）的越界列视为无数据 → 回退文件级
-                        if ((baseX + x) < exact.width && (baseZ + z) < exact.height) {
-                            int gi = (baseZ + z) * exact.width + (baseX + x);
-                            if (exact.hasData(gi)) {
-                                // 精确层：v2 起数据存原色，高度明暗显示端统一应用；v1 旧数据已含 shade 不再叠加
-                                int c = exact.color[gi];
-                                if (exact.version >= 2) {
-                                    c = MapColorCache.shade(c, exact.heightY[gi] & 0xFF);
-                                }
-                                tile.colors[col] = c;
-                                tile.exactCols++;
-                                continue;
-                            }
-                        }
-                    }
-                    int y = findSurfaceY(secStates, heightMap, col);
-                    int stateId = 0;
-                    if (y >= 0) {
-                        int[] ids = secStates.get(y >> 4);
-                        if (ids != null) {
-                            stateId = ids[((y & 15) << 8) | col];
-                        }
-                    }
-                    if (stateId == 0) {
-                        tile.colors[col] = BACKGROUND;
-                    } else {
-                        int c = colors.colorFor(stateId);
-                        tile.colors[col] = MapColorCache.shade(c, Math.max(0, Math.min(255, y)));
-                    }
-                }
-            }
-            return tile;
+            return buildTile(secStates, heightMap, exact, (cx & 31) * 16, (cz & 31) * 16);
         } catch (Exception e) {
             return null;
         }
+    }
+
+    /**
+     * 从内存 chunk NBT（如剪贴板）构建 tile：无精确层（null），纯文件级取色。
+     * 供粘贴预览使用（粘贴内容仍是原版 NBT，无需读盘）。
+     */
+    public ChunkMapTile tileFromMemory(NbtNode level) {
+        try {
+            int[] heightMap = null;
+            NbtNode hm = level.get("HeightMap");
+            if (hm != null && hm.type == NbtNode.TAG_INT_ARRAY) {
+                heightMap = (int[]) hm.value;
+            }
+            Map<Integer, int[]> secStates = new HashMap<Integer, int[]>();
+            for (NbtNode sec : SectionCodec.sectionsOf(level)) {
+                int[] ids = SectionCodec.decode(sec);
+                if (ids != null) secStates.put(SectionCodec.sectionY(sec), ids);
+            }
+            if (secStates.isEmpty()) return null;
+            return buildTile(secStates, heightMap, null, 0, 0);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /** 由 sections + HeightMap + 精确层构建 16×16 颜色 tile（坐标 base 用于精确层索引）。 */
+    private ChunkMapTile buildTile(Map<Integer, int[]> secStates, int[] heightMap,
+                                   ExactMapFile.ExactRegion exact, int baseX, int baseZ) {
+        ChunkMapTile tile = new ChunkMapTile();
+        for (int z = 0; z < 16; z++) {
+            for (int x = 0; x < 16; x++) {
+                int col = z * 16 + x;
+                if (exact != null) {
+                    // 越界防御：旧版 256 宽文件（尺寸 bug）的越界列视为无数据 → 回退文件级
+                    if ((baseX + x) < exact.width && (baseZ + z) < exact.height) {
+                        int gi = (baseZ + z) * exact.width + (baseX + x);
+                        if (exact.hasData(gi)) {
+                            // 精确层：v2 起数据存原色，高度明暗显示端统一应用；v1 旧数据已含 shade 不再叠加
+                            int c = exact.color[gi];
+                            if (exact.version >= 2) {
+                                c = MapColorCache.shade(c, exact.heightY[gi] & 0xFF);
+                            }
+                            tile.colors[col] = c;
+                            tile.exactCols++;
+                            continue;
+                        }
+                    }
+                }
+                int y = findSurfaceY(secStates, heightMap, col);
+                int stateId = 0;
+                if (y >= 0) {
+                    int[] ids = secStates.get(y >> 4);
+                    if (ids != null) {
+                        stateId = ids[((y & 15) << 8) | col];
+                    }
+                }
+                if (stateId == 0) {
+                    tile.colors[col] = BACKGROUND;
+                } else {
+                    int c = colors.colorFor(stateId);
+                    tile.colors[col] = MapColorCache.shade(c, Math.max(0, Math.min(255, y)));
+                }
+            }
+        }
+        return tile;
     }
 
     /**

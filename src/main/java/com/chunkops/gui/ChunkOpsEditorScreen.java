@@ -60,6 +60,12 @@ public class ChunkOpsEditorScreen extends GuiScreen {
     /** 面板底部同步提示（logLine 时更新）。 */
     private String panelNotice = "";
 
+    // ---- 粘贴预览（MCA 两段式）：预览不写盘，框选定位后确认才真正粘贴 ----
+    private boolean pastePreview = false;
+    private int pasteTargetCx = 0, pasteTargetCz = 0; // 预览目标左上角 chunk
+    private volatile java.util.Map<Long, ChunkMapRenderer.ChunkMapTile> previewTiles = null; // 后台解码结果
+    private int previewW = 0, previewH = 0; // 预览尺寸（chunk 数）
+
     // ------------------------------------------------------------ 右侧工具面板（功能控件）
 
     private static final int PANEL_W = 190;
@@ -137,6 +143,9 @@ public class ChunkOpsEditorScreen extends GuiScreen {
         } else {
             currentWorldDir = null;
         }
+        // 切换存档：清除地图缓存与粘贴预览
+        pastePreview = false;
+        previewTiles = null;
         renderer.clear(); // 关键：切换存档必须清空地图缓存（含进行中的异步任务），否则跨世界串图/闪烁
     }
 
@@ -209,6 +218,41 @@ public class ChunkOpsEditorScreen extends GuiScreen {
                 }
             }
             drawTileQuads(visible);
+        }
+
+        // ---- 粘贴预览（幽灵层 + 白框轮廓；框选存在时目标跟随框选） ----
+        if (pastePreview && currentWorldDir != null) {
+            if (selMinCx != -1) {
+                pasteTargetCx = selMinCx;
+                pasteTargetCz = selMinCz;
+            }
+            int ppx = mapCenterX() + (int) Math.round((pasteTargetCx * 16 - viewX) * ppb);
+            int ppy = mapCenterY + (int) Math.round((pasteTargetCz * 16 - viewZ) * ppb);
+            int psz = (int) Math.round(16 * ppb);
+            java.util.Map<Long, ChunkMapRenderer.ChunkMapTile> pt = previewTiles;
+            if (pt != null && !pt.isEmpty()) {
+                java.util.List<int[]> pv = new java.util.ArrayList<int[]>();
+                for (java.util.Map.Entry<Long, ChunkMapRenderer.ChunkMapTile> e : pt.entrySet()) {
+                    long k = e.getKey();
+                    int dx2 = (int) (k >> 32) - clipOriginCx;
+                    int dz2 = (int) (k & 0xFFFFFFFFL) - clipOriginCz;
+                    collectTileQuads(pv, e.getValue(),
+                            ppx + (int) Math.round(dx2 * 16 * ppb), ppy + (int) Math.round(dz2 * 16 * ppb),
+                            psz, 0x50000000);
+                }
+                drawTileQuads(pv);
+            }
+            // 轮廓（预览块大小）
+            int pW = Math.max(1, (int) Math.round(previewW * 16 * ppb));
+            int pH = Math.max(1, (int) Math.round(previewH * 16 * ppb));
+            int c1 = 0xFFFFFFFF, c2 = 0xFF88FF88;
+            drawRect(ppx, ppy, ppx + pW, ppy + 1, c1);
+            drawRect(ppx, ppy + pH - 1, ppx + pW, ppy + pH, c1);
+            drawRect(ppx, ppy, ppx + 1, ppy + pH, c2);
+            drawRect(ppx + pW - 1, ppy, ppx + pW, ppy + pH, c2);
+            this.fontRenderer.drawString(String.format("粘贴预览 %dx%d → (%d,%d) | Ctrl+V 确认 · Esc 取消",
+                    previewW, previewH, pasteTargetCx, pasteTargetCz),
+                    mapCenterX() - 120, 34, 0xFFAAFFAA);
         }
 
         // ---- 区块网格与坐标轴（画在地图之上） ----
@@ -295,9 +339,15 @@ public class ChunkOpsEditorScreen extends GuiScreen {
     /**
      * 收集一个 tile 的色块 quad：每 ~2px 一个色块（clamp 2..16×16），
      * 用精确边界 (ci*size/cols .. (ci+1)*size/cols) 铺满无缝隙。
+     * alphaMask 可叠加透明度（粘贴预览幽灵层用）。
      */
     private void collectTileQuads(java.util.List<int[]> out, ChunkMapRenderer.ChunkMapTile tile,
                                   int sx, int sy, int size) {
+        collectTileQuads(out, tile, sx, sy, size, 0xFF000000);
+    }
+
+    private void collectTileQuads(java.util.List<int[]> out, ChunkMapRenderer.ChunkMapTile tile,
+                                  int sx, int sy, int size, int alphaMask) {
         int cols = Math.max(2, Math.min(16, size / 2));
         for (int cz2 = 0; cz2 < cols; cz2++) {
             int ty = Math.min(15, cz2 * 16 / cols);
@@ -308,9 +358,36 @@ public class ChunkOpsEditorScreen extends GuiScreen {
                 int qx = sx + cx2 * size / cols;
                 int qx2 = sx + (cx2 + 1) * size / cols;
                 out.add(new int[]{qx, qy, Math.max(1, qx2 - qx), Math.max(1, qy2 - qy),
-                        tile.colors[ty * 16 + tx]});
+                        (tile.colors[ty * 16 + tx] & 0x00FFFFFF) | alphaMask});
             }
         }
+    }
+
+    /** 后台解码剪贴板为预览 tile（内存 NBT，无精确层）。 */
+    private void startPreviewLoad() {
+        previewTiles = null;
+        final java.util.Map<Long, byte[]> clip = clipboard;
+        Thread t = new Thread(new Runnable() {
+            public void run() {
+                java.util.Map<Long, ChunkMapRenderer.ChunkMapTile> m =
+                        new java.util.HashMap<Long, ChunkMapRenderer.ChunkMapTile>();
+                try {
+                    for (java.util.Map.Entry<Long, byte[]> e : clip.entrySet()) {
+                        com.chunkops.verify.NbtNode root = com.chunkops.core.RegionWriter.unpackChunk(e.getValue());
+                        com.chunkops.verify.NbtNode level = root.get("Level");
+                        if (level != null) {
+                            ChunkMapRenderer.ChunkMapTile t2 = renderer.tileFromMemory(level);
+                            if (t2 != null) m.put(e.getKey(), t2);
+                        }
+                    }
+                } catch (Exception ignored) {
+                    // 解码失败：仅显示轮廓
+                }
+                previewTiles = m;
+            }
+        }, "chunkops-preview");
+        t.setDaemon(true);
+        t.start();
     }
 
     /**
@@ -321,6 +398,12 @@ public class ChunkOpsEditorScreen extends GuiScreen {
         if (quads.isEmpty()) return;
         // 色块全部矩形的边界，先画底（不重复）
         final int BATCH = 12000; // quad 数/批（每 quad 4 顶点，安全余量内）
+        net.minecraft.client.renderer.GlStateManager.enableBlend();
+        net.minecraft.client.renderer.GlStateManager.tryBlendFuncSeparate(
+                net.minecraft.client.renderer.GlStateManager.SourceFactor.SRC_ALPHA,
+                net.minecraft.client.renderer.GlStateManager.DestFactor.ONE_MINUS_SRC_ALPHA,
+                net.minecraft.client.renderer.GlStateManager.SourceFactor.ONE,
+                net.minecraft.client.renderer.GlStateManager.DestFactor.ZERO);
         Tessellator tess = Tessellator.getInstance();
         for (int off = 0; off < quads.size(); off += BATCH) {
             int end = Math.min(quads.size(), off + BATCH);
@@ -341,6 +424,7 @@ public class ChunkOpsEditorScreen extends GuiScreen {
             }
             tess.draw();
         }
+        net.minecraft.client.renderer.GlStateManager.disableBlend();
     }
 
     // ------------------------------------------------------------ 右侧工具面板
@@ -609,7 +693,7 @@ public class ChunkOpsEditorScreen extends GuiScreen {
                 "C           清空选区",
                 "T           剪裁(保留选区)",
                 "S           统计选区",
-                "Ctrl+C/V    复制 / 粘贴(到视图中心)",
+                "Ctrl+C/V    复制 / 预览粘贴(拖动定位+再按确认)",
                 "Ctrl+滚轮   缩放地图",
                 "ESC         返回主菜单",
         };
@@ -708,11 +792,35 @@ public class ChunkOpsEditorScreen extends GuiScreen {
                 logLine("剪贴板为空（先复制选区）");
                 return;
             }
-            // 粘贴到当前视图中心（无需框选）：复制 A → 滚动到目标 → 粘贴
-            int pcx = (int) Math.floor(viewX / 16);
-            int pcz = (int) Math.floor(viewZ / 16);
-            logLine(GuiOps.pasteArea(currentWorldDir, clipboard, clipOriginCx, clipOriginCz, pcx, pcz));
-            renderer.clear(); // 数据已变：地图缓存失效重载
+            if (pastePreview) {
+                // 确认：真正写入（目标 = 框选左上，无框选则视图中心）
+                int tcx = selMinCx != -1 ? selMinCx : (int) Math.floor(viewX / 16);
+                int tcz = selMinCz != -1 ? selMinCz : (int) Math.floor(viewZ / 16);
+                logLine(GuiOps.pasteArea(currentWorldDir, clipboard, clipOriginCx, clipOriginCz, tcx, tcz));
+                pastePreview = false;
+                previewTiles = null;
+                renderer.clear(); // 数据已变：地图缓存失效重载
+            } else {
+                // 进入预览态（MCA 式：先预览，框选定位，再确认）
+                pastePreview = true;
+                pasteTargetCx = selMinCx != -1 ? selMinCx : (int) Math.floor(viewX / 16);
+                pasteTargetCz = selMinCz != -1 ? selMinCz : (int) Math.floor(viewZ / 16);
+                previewW = previewH = 1;
+                int minCx = Integer.MAX_VALUE, maxCx = Integer.MIN_VALUE;
+                int minCz = Integer.MAX_VALUE, maxCz = Integer.MIN_VALUE;
+                for (Long k : clipboard.keySet()) {
+                    int ccx = (int) (k >> 32);
+                    int ccz = (int) (k & 0xFFFFFFFFL);
+                    minCx = Math.min(minCx, ccx);
+                    maxCx = Math.max(maxCx, ccx);
+                    minCz = Math.min(minCz, ccz);
+                    maxCz = Math.max(maxCz, ccz);
+                }
+                previewW = Math.max(1, maxCx - minCx + 1);
+                previewH = Math.max(1, maxCz - minCz + 1);
+                startPreviewLoad();
+                logLine("粘贴预览：" + previewW + "x" + previewH + " 区块，左键拖动框选定位，再按 Ctrl+V 确认，Esc 取消");
+            }
         }
     }
 
@@ -801,6 +909,12 @@ public class ChunkOpsEditorScreen extends GuiScreen {
             return;
         }
         if (keyCode == 1) { // ESC
+            if (pastePreview) { // 预览态：ESC 取消预览（不退出）
+                pastePreview = false;
+                previewTiles = null;
+                logLine("已取消粘贴");
+                return;
+            }
             ChunkOpsGuiHandler.backToMainMenu();
             return;
         }
