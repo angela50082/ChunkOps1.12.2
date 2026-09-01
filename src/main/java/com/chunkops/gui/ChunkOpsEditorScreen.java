@@ -184,12 +184,8 @@ public class ChunkOpsEditorScreen extends GuiScreen {
             drawTileQuads(visible);
         }
 
-        // ---- 粘贴预览（幽灵层 + 白框轮廓；框选存在时目标跟随框选） ----
+        // ---- 粘贴预览（幽灵层 + 白绿轮廓框；预览态框选 = 定位，事件中直接更新 pasteTarget） ----
         if (pastePreview && currentWorldDir != null) {
-            if (selMinCx != -1) {
-                pasteTargetCx = selMinCx;
-                pasteTargetCz = selMinCz;
-            }
             int ppx = mapCenterX() + (int) Math.round((pasteTargetCx * 16 - viewX) * ppb);
             int ppy = mapCenterY + (int) Math.round((pasteTargetCz * 16 - viewZ) * ppb);
             int psz = (int) Math.round(16 * ppb);
@@ -240,8 +236,8 @@ public class ChunkOpsEditorScreen extends GuiScreen {
         drawVerticalLine(centerX, mapTop, mapBottom, 0xFF55616C);
         drawHorizontalLine(0, this.width - PANEL_W, mapCenterY, 0xFF55616C);
 
-        // ---- 选区边框 ----
-        if (selMinCx != -1 && currentWorldDir != null) {
+        // ---- 选区边框（预览态隐藏：定位时只显示预览轮廓，避免"框选"干扰） ----
+        if (selMinCx != -1 && currentWorldDir != null && !pastePreview) {
             int sx1 = mapCenterX() + (int) Math.round((selMinCx * 16 - viewX) * ppb);
             int sy1 = mapCenterY + (int) Math.round((selMinCz * 16 - viewZ) * ppb);
             int sx2 = mapCenterX() + (int) Math.round(((selMaxCx + 1) * 16 - viewX) * ppb);
@@ -769,10 +765,9 @@ public class ChunkOpsEditorScreen extends GuiScreen {
                 return;
             }
             if (pastePreview) {
-                // 确认：真正写入（目标 = 框选左上，无框选则视图中心）
-                int tcx = selMinCx != -1 ? selMinCx : (int) Math.floor(viewX / 16);
-                int tcz = selMinCz != -1 ? selMinCz : (int) Math.floor(viewZ / 16);
-                logLine(GuiOps.pasteArea(currentWorldDir, clipboard, clipOriginCx, clipOriginCz, tcx, tcz));
+                // 确认：真正写入（目标 = 预览目标 pasteTarget，单一真源，与预览显示严格一致）
+                logLine(GuiOps.pasteArea(currentWorldDir, clipboard, clipOriginCx, clipOriginCz,
+                        pasteTargetCx, pasteTargetCz));
                 pastePreview = false;
                 previewTiles = null;
                 renderer.clear(); // 数据已变：地图缓存失效重载
@@ -862,6 +857,11 @@ public class ChunkOpsEditorScreen extends GuiScreen {
             selMaxCx = Math.max(cx1, cx2);
             selMinCz = Math.min(cz1, cz2);
             selMaxCz = Math.max(cz1, cz2);
+            if (pastePreview) {
+                // 预览态：框选 = 定位预览目标（事件内立即更新，不依赖渲染帧）
+                pasteTargetCx = selMinCx;
+                pasteTargetCz = selMinCz;
+            }
         } else if (moving) {
             viewX -= (mouseX - lastMouseX) / zoom;
             viewZ -= (mouseY - lastMouseY) / zoom;
