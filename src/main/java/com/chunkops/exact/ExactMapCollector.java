@@ -44,14 +44,18 @@ public class ExactMapCollector {
 
     /** 扫描间隔（tick）。10 tick ≈ 0.5s：快速移动/飞行时不错过加载中的 chunk。 */
     private static final int TICK_INTERVAL = 10;
+    /** 定期兜底重采间隔（tick）：6000 tick = 5 分钟（事件之外的低频兜底，覆盖流体等无事件变化）。 */
+    private static final long RESAMPLE_PERIOD = 6000L;
     private static final int MAX_QUEUE = 4096;
     /** 防重集合上限（超限清空，重采为幂等覆盖写）。 */
     private static final int COLLECTED_MAX = 200000;
 
-    /** 已完成采集（key=世界#维度#cx,cz；成功写盘才标记）。 */
-    private final ConcurrentHashMap<String, Boolean> collected = new ConcurrentHashMap<String, Boolean>();
+    /** 已完成采集（key=世界#维度#cx,cz；值为最后采集时间 tick，成功写盘才记录）。 */
+    private final ConcurrentHashMap<String, Long> collected = new ConcurrentHashMap<String, Long>();
     /** 已入队/采集中（防重复入队；完成后移除）。 */
     private final java.util.Set<String> pendingKeys = ConcurrentHashMap.newKeySet();
+    /** 已变化待重采的 chunk（方块放置/破坏/爆炸事件标记；成功重采后移除）。 */
+    private final java.util.Set<String> dirtyChunks = ConcurrentHashMap.newKeySet();
     private final LinkedBlockingQueue<Task> queue = new LinkedBlockingQueue<Task>();
     private final ExecutorService workers;
     private final AtomicInteger tickCounter = new AtomicInteger();
@@ -71,7 +75,35 @@ public class ExactMapCollector {
         }
     }
 
+    /**
+     * 关闭：退出世界/游戏前**同步重采全部 dirty chunk**（方块最近变化的区块），
+     * 保证编辑器中看到的是最新形态（玩家放置/破坏后立刻退出的场景）。
+     */
     public void shutdown() {
+        try {
+            Minecraft mc = Minecraft.getMinecraft();
+            if (mc.getIntegratedServer() != null) {
+                for (String key : dirtyChunks) {
+                    try {
+                        // key = worldName#dim#cx,cz
+                        String[] parts = key.split("#");
+                        if (parts.length < 3) continue;
+                        int dim = Integer.parseInt(parts[1]);
+                        String[] c = parts[2].split(",");
+                        int cx = Integer.parseInt(c[0]);
+                        int cz = Integer.parseInt(c[1]);
+                        WorldServer sw = mc.getIntegratedServer().getWorld(dim);
+                        if (sw != null) {
+                            collect(sw, cx, cz, key); // 同步：退出前保证落盘
+                        }
+                    } catch (Exception ignored) {
+                        // 单区块失败：跳过（其余照采）
+                    }
+                }
+            }
+        } catch (Exception ignored) {
+            // 采集失败不阻塞退出
+        }
         workers.shutdownNow();
     }
 
@@ -85,7 +117,7 @@ public class ExactMapCollector {
         offer((WorldClient) w, event.getChunk().x, event.getChunk().z);
     }
 
-    /** 兜底路径：客户端 tick 扫描玩家周围已加载 chunk。 */
+    /** 兜底路径：客户端 tick 扫描玩家周围已加载 chunk（含 dirty 重采与定期兜底）。 */
     @SubscribeEvent
     public void onClientTick(TickEvent.ClientTickEvent event) {
         if (event.phase != TickEvent.Phase.END) return;
@@ -98,12 +130,18 @@ public class ExactMapCollector {
         int cz = mc.player.chunkCoordZ;
         // 覆盖加载半径（+2 余量），飞行/快速移动不错过
         int r = mc.gameSettings.renderDistanceChunks + 2;
+        long now = System.currentTimeMillis();
         for (int dz = -r; dz <= r; dz++) {
             for (int dx = -r; dx <= r; dx++) {
                 int wx = cx + dx;
                 int wz = cz + dz;
                 String key = keyFor(world, wx, wz);
-                if (collected.containsKey(key) || pendingKeys.contains(key)) continue;
+                if (pendingKeys.contains(key)) continue;
+                Long last = collected.get(key);
+                if (last != null) {
+                    // 已采集：dirty（方块变化）→ 立即重采；否则 5 分钟定期兜底（流体等无事件变化）
+                    if (!dirtyChunks.contains(key) && now - last < RESAMPLE_PERIOD) continue;
+                }
                 try {
                     net.minecraft.world.chunk.IChunkProvider prov = world.getChunkProvider();
                     if (prov != null && prov.getLoadedChunk(wx, wz) != null) offer(world, wx, wz);
@@ -111,6 +149,36 @@ public class ExactMapCollector {
                     // 世界状态切换瞬间：跳过
                 }
             }
+        }
+    }
+
+    // ------------------------------------------------------------ 方块变化（精确重采）
+
+    /** 方块放置/破坏 → 标记所在 chunk 为 dirty（下次扫描立即重采，编辑器数据保持最新）。 */
+    @SubscribeEvent
+    public void onBlockChanged(net.minecraftforge.event.world.BlockEvent event) {
+        if (!(event instanceof net.minecraftforge.event.world.BlockEvent.PlaceEvent)
+                && !(event instanceof net.minecraftforge.event.world.BlockEvent.BreakEvent)) return;
+        markDirty(event.getWorld(), event.getPos());
+    }
+
+    /** 爆炸毁方块 → 标记覆盖范围。 */
+    @SubscribeEvent
+    public void onExplosion(net.minecraftforge.event.world.ExplosionEvent.Detonate event) {
+        if (event.getAffectedBlocks() == null) return;
+        for (net.minecraft.util.math.BlockPos p : event.getAffectedBlocks()) {
+            markDirty(event.getWorld(), p);
+        }
+    }
+
+    private void markDirty(World world, net.minecraft.util.math.BlockPos pos) {
+        try {
+            if (Minecraft.getMinecraft().getIntegratedServer() == null) return; // 仅单人
+            if (!(world instanceof net.minecraft.world.WorldServer)) return;      // 集成服务器世界
+            int cx = pos.getX() >> 4;
+            int cz = pos.getZ() >> 4;
+            dirtyChunks.add(keyFor(world, cx, cz));
+        } catch (Exception ignored) {
         }
     }
 
@@ -188,7 +256,7 @@ public class ExactMapCollector {
         if (world == null) return; // key 未标记 → 可重试
         try {
             if (Minecraft.getMinecraft().getIntegratedServer() == null) {
-                collected.put(key, Boolean.TRUE); // 多人/无存档：放弃采集（标记完成避免反复排队）
+                collected.put(key, Long.valueOf(0L)); // 多人/无存档：放弃采集（标记完成避免反复排队）
                 return;
             }
             Chunk chunk = world.getChunk(cx, cz);
@@ -243,7 +311,8 @@ public class ExactMapCollector {
                 }
                 ExactMapFile.write(file, reg);
             }
-            collected.put(key, Boolean.TRUE); // 写盘成功 → 完成
+            collected.put(key, Long.valueOf(System.currentTimeMillis())); // 写盘成功 → 完成/刷新时间
+            dirtyChunks.remove(key);
             if (collected.size() > COLLECTED_MAX) collected.clear();
         } catch (Exception e) {
             LOG.debug("exact collect exception at " + cx + "," + cz + ": " + e.getMessage());

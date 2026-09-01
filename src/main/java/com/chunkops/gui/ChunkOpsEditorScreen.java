@@ -51,11 +51,12 @@ public class ChunkOpsEditorScreen extends GuiScreen {
     /** 面板底部同步提示（logLine 时更新）。 */
     private String panelNotice = "";
 
-    // ---- 粘贴预览（MCA 两段式）：预览不写盘，框选定位后确认才真正粘贴 ----
+    // ---- 粘贴预览（MCA 两段式）：预览不写盘，左键直接拖动轮廓定位，确认后才真正粘贴 ----
     private boolean pastePreview = false;
     private int pasteTargetCx = 0, pasteTargetCz = 0; // 预览目标左上角 chunk
     private volatile java.util.Map<Long, ChunkMapRenderer.ChunkMapTile> previewTiles = null; // 后台解码结果
     private int previewW = 0, previewH = 0; // 预览尺寸（chunk 数）
+    private boolean dragPreview = false;    // 预览态左键拖动中
 
     // ------------------------------------------------------------ 右侧工具面板（功能控件）
 
@@ -210,7 +211,7 @@ public class ChunkOpsEditorScreen extends GuiScreen {
             drawRect(ppx, ppy + pH - 1, ppx + pW, ppy + pH, c1);
             drawRect(ppx, ppy, ppx + 1, ppy + pH, c2);
             drawRect(ppx + pW - 1, ppy, ppx + pW, ppy + pH, c2);
-            this.fontRenderer.drawString(String.format("粘贴预览 %dx%d → (%d,%d) | Ctrl+V 确认 · Esc 取消",
+            this.fontRenderer.drawString(String.format("粘贴预览 %dx%d → (%d,%d) | 左键拖动定位 · Ctrl+V 确认 · Esc 取消",
                     previewW, previewH, pasteTargetCx, pasteTargetCz),
                     mapCenterX() - 120, 34, 0xFFAAFFAA);
         }
@@ -236,8 +237,8 @@ public class ChunkOpsEditorScreen extends GuiScreen {
         drawVerticalLine(centerX, mapTop, mapBottom, 0xFF55616C);
         drawHorizontalLine(0, this.width - PANEL_W, mapCenterY, 0xFF55616C);
 
-        // ---- 选区边框（预览态隐藏：定位时只显示预览轮廓，避免"框选"干扰） ----
-        if (selMinCx != -1 && currentWorldDir != null && !pastePreview) {
+        // ---- 选区边框（预览态不产生框选，无冲突） ----
+        if (selMinCx != -1 && currentWorldDir != null) {
             int sx1 = mapCenterX() + (int) Math.round((selMinCx * 16 - viewX) * ppb);
             int sy1 = mapCenterY + (int) Math.round((selMinCz * 16 - viewZ) * ppb);
             int sx2 = mapCenterX() + (int) Math.round(((selMaxCx + 1) * 16 - viewX) * ppb);
@@ -687,7 +688,7 @@ public class ChunkOpsEditorScreen extends GuiScreen {
                 "C           清空选区",
                 "T           剪裁(保留选区)",
                 "S           统计选区",
-                "Ctrl+C/V    复制 / 预览粘贴(拖动定位+再按确认)",
+                "Ctrl+C/V    复制 / 预览粘贴(左键拖动定位+再按确认)",
                 "Ctrl+滚轮   缩放地图",
                 "ESC         返回主菜单",
         };
@@ -790,7 +791,7 @@ public class ChunkOpsEditorScreen extends GuiScreen {
                 previewW = Math.max(1, maxCx - minCx + 1);
                 previewH = Math.max(1, maxCz - minCz + 1);
                 startPreviewLoad();
-                logLine("粘贴预览：" + previewW + "x" + previewH + " 区块，左键拖动框选定位，再按 Ctrl+V 确认，Esc 取消");
+                logLine("粘贴预览：" + previewW + "x" + previewH + " 区块，左键拖动预览定位，再按 Ctrl+V 确认，Esc 取消");
             }
         }
     }
@@ -823,10 +824,13 @@ public class ChunkOpsEditorScreen extends GuiScreen {
             return;
         }
         if (panelClick(mouseX, mouseY, mouseButton)) return; // 右侧面板优先
-        if (pastePreview && mouseButton == 0) {
-            // 预览态：左键拖动 = 框选定位（正常框选逻辑，落地位置即目标）
-        }
-        if (mouseButton == 0) { // 左键：框选
+        if (mouseButton == 0) { // 左键
+            if (pastePreview) {
+                // 预览态：左键直接拖动预览轮廓（中心跟随鼠标），不进入框选
+                dragPreview = true;
+                dragPreviewTo(mouseX, mouseY);
+                return;
+            }
             selecting = true;
             lastMouseX = mouseX;
             lastMouseY = mouseY;
@@ -842,10 +846,22 @@ public class ChunkOpsEditorScreen extends GuiScreen {
         }
     }
 
+    /** 预览拖动：中心跟随鼠标（预览左上角 = 鼠标中心 - 尺寸/2）。 */
+    private void dragPreviewTo(int mouseX, int mouseY) {
+        int mxC = (int) Math.round(screenToBlockX(mouseX) / 16.0);
+        int mzC = (int) Math.round(screenToBlockZ(mouseY) / 16.0);
+        pasteTargetCx = mxC - previewW / 2;
+        pasteTargetCz = mzC - previewH / 2;
+    }
+
     @Override
     protected void mouseClickMove(int mouseX, int mouseY, int clickedMouseButton, long timeSinceLastClick) {
         if (zoomDrag) { // 缩放滑块拖动
             applyZoomFromSlider(mouseX);
+            return;
+        }
+        if (dragPreview) { // 预览态：拖动预览轮廓
+            dragPreviewTo(mouseX, mouseY);
             return;
         }
         if (selecting) {
@@ -857,11 +873,6 @@ public class ChunkOpsEditorScreen extends GuiScreen {
             selMaxCx = Math.max(cx1, cx2);
             selMinCz = Math.min(cz1, cz2);
             selMaxCz = Math.max(cz1, cz2);
-            if (pastePreview) {
-                // 预览态：框选 = 定位预览目标（事件内立即更新，不依赖渲染帧）
-                pasteTargetCx = selMinCx;
-                pasteTargetCz = selMinCz;
-            }
         } else if (moving) {
             viewX -= (mouseX - lastMouseX) / zoom;
             viewZ -= (mouseY - lastMouseY) / zoom;
@@ -881,6 +892,7 @@ public class ChunkOpsEditorScreen extends GuiScreen {
         }
         moving = false;
         zoomDrag = false;
+        dragPreview = false;
         super.mouseReleased(mouseX, mouseY, state);
     }
 
