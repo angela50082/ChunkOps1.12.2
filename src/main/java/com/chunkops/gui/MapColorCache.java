@@ -37,33 +37,49 @@ public class MapColorCache {
         try {
             IBlockState state = Block.getStateById(stateId);
             if (state == null) return 0xFF888888;
-            IBakedModel model = Minecraft.getMinecraft().getBlockRendererDispatcher().getModelForState(state);
-            if (model == null) return 0xFF888888;
-            // 优先朝上 quad，无顶面回退任意面；逐个 quad 尝试有效颜色
-            for (BakedQuad quad : quadsOf(model, state)) {
-                TextureAtlasSprite sprite = quad.getSprite();
-                if (sprite == null) continue;
-                // 关键：使用 atlas 中已注册的 sprite（quad 上的 sprite 对象可能无帧数据）
-                try {
-                    TextureAtlasSprite registered = Minecraft.getMinecraft().getTextureMapBlocks()
-                            .getAtlasSprite(sprite.getIconName());
-                    if (registered != null) sprite = registered;
-                } catch (Exception ignored) {
-                    // 保持原 sprite
-                }
-                int c = quadColor(quad, sprite);
-                if (isValidColor(c)) return c;
-            }
-            // 兜底：方块地图色（模板方块多为黑/灰，但至少不显示紫黑噪点）
+            // MapColor 优先（=原版地图该方块的色：水=蓝/草=浅绿/岩浆=橙…），与精确层底色一致，
+            // 解决"纹理中心色"的通道错乱/品红问题（水变紫等）。通用灰/金属色例外（见下）。
+            net.minecraft.block.material.MapColor mc = null;
             try {
-                int mc = (state.getMapColor(null, BlockPos.ORIGIN)).colorValue;
-                return mc != 0 ? (0xFF000000 | mc) : 0xFF888888;
-            } catch (Exception e) {
-                return 0xFF888888;
+                mc = state.getMapColor(null, BlockPos.ORIGIN);
+            } catch (Exception ignored) {
+                // 部分方块 getMapColor(null) 异常 → 走纹理色
             }
+            if (mc != null && mc.colorValue != 0 && !isGenericMapColor(mc)) {
+                return 0xFF000000 | mc.colorValue;
+            }
+            // 通用灰/金属色（很多模组机器默认共用）→ 纹理中心色区分它们
+            IBakedModel model = Minecraft.getMinecraft().getBlockRendererDispatcher().getModelForState(state);
+            if (model != null) {
+                for (BakedQuad quad : quadsOf(model, state)) {
+                    TextureAtlasSprite sprite = quad.getSprite();
+                    if (sprite == null) continue;
+                    try {
+                        TextureAtlasSprite registered = Minecraft.getMinecraft().getTextureMapBlocks()
+                                .getAtlasSprite(sprite.getIconName());
+                        if (registered != null) sprite = registered;
+                    } catch (Exception ignored) {
+                        // 保持原 sprite
+                    }
+                    int c = quadColor(quad, sprite);
+                    if (isValidColor(c)) return c;
+                }
+            }
+            // 兜底：MapColor（即使通用色），否则灰
+            return (mc != null && mc.colorValue != 0) ? (0xFF000000 | mc.colorValue) : 0xFF888888;
         } catch (Exception e) {
             return 0xFF888888;
         }
+    }
+
+    /** 通用灰/金属 MapColor：这类色被大量模组机器默认共用，用纹理中心色更能区分。 */
+    private static boolean isGenericMapColor(net.minecraft.block.material.MapColor mc) {
+        return mc.colorIndex == net.minecraft.block.material.MapColor.STONE.colorIndex
+                || mc.colorIndex == net.minecraft.block.material.MapColor.IRON.colorIndex
+                || mc.colorIndex == net.minecraft.block.material.MapColor.GRAY.colorIndex
+                || mc.colorIndex == net.minecraft.block.material.MapColor.SILVER.colorIndex
+                || mc.colorIndex == net.minecraft.block.material.MapColor.BLACK.colorIndex
+                || mc.colorIndex == net.minecraft.block.material.MapColor.AIR.colorIndex;
     }
 
     private static java.util.List<BakedQuad> quadsOf(IBakedModel model, IBlockState state) {
