@@ -41,6 +41,25 @@ public class ChunkOpsMod {
         try {
             File mcDir = Loader.instance().getConfigDir().getParentFile();
             ChunkOpsExport.export(mcDir);
+            // 诊断（REID 存储表寻址）：多种取值途径对比，定位与存档 palette 项一致的来源
+            try {
+                net.minecraft.block.Block bf = net.minecraft.block.Block.getBlockFromName(
+                        "forestry:fences.vanilla.fireproof.0");
+                if (bf != null) {
+                    net.minecraft.block.state.IBlockState st = bf.getDefaultState();
+                    int rid = net.minecraft.block.Block.getIdFromBlock(bf);
+                    int regId = net.minecraft.block.Block.REGISTRY.getIDForObject(bf);
+                    int gsid = net.minecraft.block.Block.getStateId(st);
+                    int storage = ChunkOpsExport.storageStateId(st);
+                    logger.info("[ChunkOps-diag] forestry:fences.vanilla.fireproof.0  "
+                            + "getIdFromBlock={} REGISTRY={} getStateId={} storageStateId={}",
+                            rid, regId, gsid, storage);
+                } else {
+                    logger.info("[ChunkOps-diag] forestry:fences.vanilla.fireproof.0 未找到");
+                }
+            } catch (Exception ie) {
+                logger.info("[ChunkOps-diag] 诊断失败: " + ie.getMessage());
+            }
         } catch (Exception e) {
             logger.error("registry-snapshot 导出失败", e);
         }

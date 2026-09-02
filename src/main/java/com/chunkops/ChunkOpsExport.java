@@ -33,17 +33,26 @@ public class ChunkOpsExport {
 
     /**
      * 存储级 stateId（与存档 palette 项一致）：
-     * REID 只 patch 了公开 API getStateId（返回运行时重映射值），而写盘/存盘使用底层表
-     * Block.field_176229_d（SRG，= ObjectIntIdentityMap of IBlockState）——必须反射访问。
+     * REID 只 patch 了部分路径（公开 API/写盘），而读写存档使用的底层 ObjectIntIdentityMap
+     * 字段名在反混淆环境为 MCP 名（非 SRG）——多候选反射。
      */
     public static int storageStateId(net.minecraft.block.state.IBlockState st) {
         try {
-            java.lang.reflect.Field f = net.minecraft.block.Block.class.getDeclaredField("field_176229_d");
-            f.setAccessible(true);
-            Object map = f.get(null);
-            java.lang.reflect.Method get = map.getClass().getMethod("get", Object.class);
-            Object v = get.invoke(map, st);
-            if (v instanceof Number) return ((Number) v).intValue();
+            java.lang.reflect.Field f = null;
+            for (String fname : new String[]{"field_176229_d", "stateToId", "idToState", "STATE_TO_ID"}) {
+                try {
+                    f = net.minecraft.block.Block.class.getDeclaredField(fname);
+                    break;
+                } catch (NoSuchFieldException ignored) {
+                }
+            }
+            if (f != null) {
+                f.setAccessible(true);
+                Object map = f.get(null);
+                java.lang.reflect.Method get = map.getClass().getMethod("get", Object.class);
+                Object v = get.invoke(map, st);
+                if (v instanceof Number) return ((Number) v).intValue();
+            }
         } catch (Exception ignored) {
             // 反射失败回退公开 API
         }
