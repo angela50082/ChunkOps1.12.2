@@ -57,6 +57,12 @@ public class NbtNode {
         return n;
     }
 
+    public static NbtNode doubleNode(double v) {
+        NbtNode n = new NbtNode(TAG_DOUBLE);
+        n.value = Double.valueOf(v);
+        return n;
+    }
+
     public static NbtNode stringNode(String v) {
         NbtNode n = new NbtNode(TAG_STRING);
         n.value = v;

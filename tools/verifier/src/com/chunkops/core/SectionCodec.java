@@ -39,15 +39,20 @@ public class SectionCodec {
     }
 
     /**
-     * JEID 索引数组格式（GreedyCraft 实测，2026-09-01）：
-     * Blocks byte[4096] = Palette int[] 的索引；Palette 项 = stateId（id<<4|meta，id 可 >4095）；
-     * Data nibble 为兼容字段（palette 已含全状态，忽略）。
+     * JEID/REID 索引数组格式（RoughlyEnoughIDs 2.3.0 字节码逆向，2026-09-02 定案）：
+     * 12 位压缩索引：seq = (Blocks[i]&255)<<4 | Data 半字节（i 低 12 位 = (y<<8)|(z<<4)|x，x 偶=低半字节）；
+     * stateId = Palette int[] [seq]（Palette 项=stateId，按首次出现顺序；支持 id>4095）。
      */
     static int[] decodeJeidIndex(NbtNode section, byte[] indices, int[] palValues) {
+        byte[] data = section.get("Data") != null && section.get("Data").type == NbtNode.TAG_BYTE_ARRAY
+                ? (byte[]) section.get("Data").value : null;
         int[] stateIds = new int[BLOCKS_PER_SECTION];
         for (int i = 0; i < BLOCKS_PER_SECTION; i++) {
-            int idx = indices[i] & 0xFF;
-            stateIds[i] = idx >= 0 && idx < palValues.length ? palValues[idx] : 0;
+            int seq = (indices[i] & 0xFF) << 4;
+            if (data != null) {
+                seq |= nibble(data[i >> 1], (i & 1) == 0);
+            }
+            stateIds[i] = seq >= 0 && seq < palValues.length ? palValues[seq] : 0;
         }
         return stateIds;
     }
@@ -151,14 +156,16 @@ public class SectionCodec {
     }
 
     /**
-     * palette 编码（JEID 索引数组格式，decodeJeidIndex 的逆操作）：
-     * Palette int[]（stateId，支持 >4095）+ Blocks byte[4096]（索引）+ Data nibble（meta 冗余）。
-     * 注意：非 1.13 blockStates 格式（JEID 实测定案）。
+     * palette 编码（REID/JEID 12 位压缩索引格式，decodeJeidIndex 的逆操作）：
+     * Palette int[]（stateId，按首次出现顺序，支持 >4095）+
+     * Blocks byte[4096]=（序的高 8 位）逐位置 + Data nibble=（序的低 4 位）。
+     * 注意：不是 1.13 blockStates，也不是"Blocks=直接索引"——REID 2.3.0 字节码逆向定案。
      */
     public static NbtNode encodePalette(int[] stateIds) {
         java.util.Map<Integer, Integer> stateToIdx = new java.util.HashMap<Integer, Integer>();
         java.util.List<Integer> pal = new java.util.ArrayList<Integer>();
-        byte[] idxs = new byte[stateIds.length];
+        byte[] blocks = new byte[BLOCKS_PER_SECTION];
+        byte[] data = new byte[BLOCKS_PER_SECTION / 2];
         for (int i = 0; i < stateIds.length; i++) {
             Integer idx = stateToIdx.get(stateIds[i]);
             if (idx == null) {
@@ -166,20 +173,18 @@ public class SectionCodec {
                 stateToIdx.put(stateIds[i], idx);
                 pal.add(Integer.valueOf(stateIds[i]));
             }
-            idxs[i] = (byte) idx.intValue();
+            int seq = idx.intValue(); // 压缩序号（12 位）
+            blocks[i] = (byte) ((seq >>> 4) & 0xFF);
+            int half = i >> 1;
+            int nib = seq & 0xF;
+            if ((i & 1) == 0) data[half] = (byte) ((data[half] & 0xF0) | nib);
+            else data[half] = (byte) ((data[half] & 0x0F) | (nib << 4));
         }
         int[] palVals = new int[pal.size()];
         for (int i = 0; i < pal.size(); i++) palVals[i] = pal.get(i).intValue();
-        byte[] data = new byte[BLOCKS_PER_SECTION / 2];
-        for (int i = 0; i < stateIds.length; i++) {
-            int meta = stateIds[i] & 15;
-            int half = i >> 1;
-            if ((i & 1) == 0) data[half] = (byte) ((data[half] & 0xF0) | meta);
-            else data[half] = (byte) ((data[half] & 0x0F) | (meta << 4));
-        }
         NbtNode sec = NbtNode.compound();
         sec.asMap().put("Palette", NbtNode.intArrayNode(palVals));
-        sec.asMap().put("Blocks", NbtNode.byteArrayNode(idxs));
+        sec.asMap().put("Blocks", NbtNode.byteArrayNode(blocks));
         sec.asMap().put("Data", NbtNode.byteArrayNode(data));
         return sec;
     }

@@ -211,6 +211,9 @@ public class GuiOps {
                     com.chunkops.core.Mcops.importChunks(mcops, liveSnapshot(), report, jeid);
             int n = 0, errors = 0;
             String lastErr = "";
+            // 整体平移量（方块坐标）：TE/实体坐标随 chunk 一起平移（否则多方块机器错位卡死，实测定案）
+            int dxb = (targetCx - originCx) * 16;
+            int dzb = (targetCz - originCz) * 16;
             // 按 region 分组：Map<regionKey, RegionWriter>
             java.util.Map<String, Object[]> regionWriters = new java.util.LinkedHashMap<String, Object[]>();
             for (com.chunkops.verify.NbtNode root : roots) {
@@ -225,6 +228,45 @@ public class GuiOps {
                     int cz = targetCz + dz;
                     level.asMap().put("xPos", com.chunkops.verify.NbtNode.intNode(cx));
                     level.asMap().put("zPos", com.chunkops.verify.NbtNode.intNode(cz));
+                    // ---- 平移动 TileEntities 的 x/y/z（否则多方块机器错位卡死，实测定案） ----
+                    com.chunkops.verify.NbtNode tes = level.get("TileEntities");
+                    if (tes != null && tes.type == com.chunkops.verify.NbtNode.TAG_LIST) {
+                        for (com.chunkops.verify.NbtNode te : tes.asList()) {
+                            for (String k : new String[]{"x", "y", "z"}) {
+                                com.chunkops.verify.NbtNode v = te.get(k);
+                                if (v != null) {
+                                    int ov = ((Number) v.value).intValue();
+                                    int nv = k.equals("y") ? ov : (k.equals("x") ? ov + dxb : ov + dzb);
+                                    te.asMap().put(k, com.chunkops.verify.NbtNode.intNode(nv));
+                                }
+                            }
+                        }
+                    }
+                    // ---- 平移 Entities 的 Pos（及 LeashedTo） ----
+                    com.chunkops.verify.NbtNode ents = level.get("Entities");
+                    if (ents != null && ents.type == com.chunkops.verify.NbtNode.TAG_LIST) {
+                        for (com.chunkops.verify.NbtNode ent : ents.asList()) {
+                            com.chunkops.verify.NbtNode pos = ent.get("Pos");
+                            if (pos != null && pos.type == com.chunkops.verify.NbtNode.TAG_LIST
+                                    && pos.asList().size() >= 3) {
+                                double x = ((Number) pos.asList().get(0).value).doubleValue() + dxb;
+                                double z = ((Number) pos.asList().get(2).value).doubleValue() + dzb;
+                                pos.asList().set(0, com.chunkops.verify.NbtNode.doubleNode(x));
+                                pos.asList().set(2, com.chunkops.verify.NbtNode.doubleNode(z));
+                            }
+                            com.chunkops.verify.NbtNode leash = ent.get("LeashedTo");
+                            if (leash != null && leash.type == com.chunkops.verify.NbtNode.TAG_COMPOUND) {
+                                for (String k : new String[]{"X", "Z"}) {
+                                    com.chunkops.verify.NbtNode v = leash.get(k);
+                                    if (v != null) {
+                                        double ov = ((Number) v.value).doubleValue();
+                                        double nv = k.equals("X") ? ov + dxb : ov + dzb;
+                                        leash.asMap().put(k, com.chunkops.verify.NbtNode.doubleNode(nv));
+                                    }
+                                }
+                            }
+                        }
+                    }
                     byte[] payload = com.chunkops.core.RegionWriter.packChunk(root);
                     int rx = Math.floorDiv(cx, 32);
                     int rz = Math.floorDiv(cz, 32);
