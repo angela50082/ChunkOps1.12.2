@@ -153,32 +153,45 @@ public class GuiOps {
 
     // ------------------------------------------------------------ 名称化剪贴板（跨模组集安全）
 
-    /** 活注册表快照（会话级缓存，构建于运行时注册表——同会话内恒定）。 */
+    /** 活注册表快照（会话级缓存）。优先使用 registry-snapshot.json（模组 init 导出，经验证保真）；
+     * 缺失时内存构建。REID 环境下内存遍历与文件快照存在差异（实测：enderio/forestry 部分方块
+     * 名称化错位），必须统一走文件快照。 */
     private static com.chunkops.core.RegistrySnapshot liveSnap = null;
 
     public static synchronized com.chunkops.core.RegistrySnapshot liveSnapshot() {
         if (liveSnap == null) {
-            com.chunkops.core.RegistrySnapshot s = new com.chunkops.core.RegistrySnapshot();
-            for (Block b : Block.REGISTRY) {
-                ResourceLocation rl = Block.REGISTRY.getNameForObject(b);
-                if (rl == null) continue;
-                com.chunkops.core.RegistrySnapshot.BlockEntry e =
-                        new com.chunkops.core.RegistrySnapshot.BlockEntry();
-                e.name = rl.toString();
-                e.id = Block.getIdFromBlock(b);
-                s.blocks.add(e);
+            try {
+                File f = new File(net.minecraftforge.fml.common.Loader.instance()
+                        .getConfigDir().getParentFile(), "registry-snapshot.json");
+                if (f.isFile()) {
+                    liveSnap = com.chunkops.core.RegistrySnapshot.load(f);
+                }
+            } catch (Exception ignored) {
+                // 文件不可用 → 内存构建
             }
-            for (Biome b : Biome.REGISTRY) {
-                ResourceLocation rl = Biome.REGISTRY.getNameForObject(b);
-                if (rl == null) continue;
-                com.chunkops.core.RegistrySnapshot.BiomeEntry e =
-                        new com.chunkops.core.RegistrySnapshot.BiomeEntry();
-                e.name = rl.toString();
-                e.id = Biome.getIdForBiome(b);
-                s.biomes.add(e);
+            if (liveSnap == null) {
+                com.chunkops.core.RegistrySnapshot s = new com.chunkops.core.RegistrySnapshot();
+                for (Block b : Block.REGISTRY) {
+                    ResourceLocation rl = Block.REGISTRY.getNameForObject(b);
+                    if (rl == null) continue;
+                    com.chunkops.core.RegistrySnapshot.BlockEntry e =
+                            new com.chunkops.core.RegistrySnapshot.BlockEntry();
+                    e.name = rl.toString();
+                    e.id = Block.getIdFromBlock(b);
+                    s.blocks.add(e);
+                }
+                for (Biome b : Biome.REGISTRY) {
+                    ResourceLocation rl = Biome.REGISTRY.getNameForObject(b);
+                    if (rl == null) continue;
+                    com.chunkops.core.RegistrySnapshot.BiomeEntry e =
+                            new com.chunkops.core.RegistrySnapshot.BiomeEntry();
+                    e.name = rl.toString();
+                    e.id = Biome.getIdForBiome(b);
+                    s.biomes.add(e);
+                }
+                s.index();
+                liveSnap = s;
             }
-            s.index();
-            liveSnap = s;
         }
         return liveSnap;
     }
