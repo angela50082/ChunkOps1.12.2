@@ -253,7 +253,9 @@ public class ChunkOpsEditorScreen extends GuiScreen {
             }
         }
 
-        // 世界信息
+        // ---- 顶部栏（存档下拉 + 状态） ----
+        drawRect(0, 0, this.width, 28, 0xE0101418);
+        drawRect(0, 27, this.width, 28, 0xFF3A444E);
         String name = selectedWorld >= 0 && selectedWorld < worlds.size()
                 ? worlds.get(selectedWorld).getDisplayName() : "（无存档）";
         // 存档下拉按钮（替代 "<" ">" 切换）
@@ -280,8 +282,11 @@ public class ChunkOpsEditorScreen extends GuiScreen {
             }
         }
         this.fontRenderer.drawString(String.format("%d 个存档 | 已加载 %d 区块 | 加载中 %d | 精确层 %d 列",
-                worlds.size(), loadedCount, pendingCount, exactCount), 230, 12, 0xAAAAAA);
+                worlds.size(), loadedCount, pendingCount, exactCount), 234, 10, 0xFF9FA6AD);
 
+        // ---- 底部栏（坐标/帮助） ----
+        drawRect(0, this.height - 30, this.width, this.height, 0xE0101418);
+        drawRect(0, this.height - 30, this.width, this.height - 29, 0xFF3A444E);
         // 状态栏（左下角：中心 + 鼠标指向区块）
         String centerStr = String.format("中心: %.0f, %.0f  缩放: %.1f px/方块", viewX, viewZ, ppb);
         this.fontRenderer.drawString(centerStr, 6, this.height - 24, 0xAAAAAA);
@@ -298,7 +303,7 @@ public class ChunkOpsEditorScreen extends GuiScreen {
         }
         this.fontRenderer.drawString(ptrStr, 6 + cw, this.height - 24, 0xFF88CCFF);
         this.fontRenderer.drawString("左键框选 · 中键拖动 · 右键取消框选 · 滚轮缩放 · 快捷键 ? · ESC 返回",
-                mapCenterX() - 140, this.height - 12, 0x888888);
+                mapCenterX() - 140, this.height - 12, 0xFF6F767C);
 
         // ---- 右侧工具面板（自绘控件：按钮/滑块/统计列表/过滤框） ----
         // 异步统计结果应用（主线程）
@@ -319,12 +324,13 @@ public class ChunkOpsEditorScreen extends GuiScreen {
         }
         drawRightPanel(mouseX, mouseY);
 
-        // 日志（左侧，半透明背景）
+        // 日志（左下角，半透明+边框，不再用刺眼的绿字）
         if (!log.isEmpty()) {
             int ly = this.height - 34 - log.size() * 10;
-            drawRect(0, ly - 2, 360, this.height - 30, 0x88000000);
+            drawRect(0, ly - 2, 380, this.height - 30, 0xB00E1014);
+            drawRect(0, ly - 2, 380, ly - 1, 0xFF3A444E);
             for (String line : log) {
-                this.fontRenderer.drawString(line, 4, ly, 0xAAFFAA);
+                this.fontRenderer.drawString(line, 4, ly, 0xFFD8D8D8);
                 ly += 10;
             }
         }
@@ -465,11 +471,14 @@ public class ChunkOpsEditorScreen extends GuiScreen {
         int py0 = 30, py1 = this.height - 30;
         drawRect(px, py0, this.width, py1, 0xEE14181C);
         drawRect(px, py0, px + 1, py1, 0xFF3A444E);
-        this.fontRenderer.drawString("工具", px + 12, 42, 0xFFFFFFFF);
-        this.fontRenderer.drawString("?", px + PANEL_W - 22, 42, helpOpen ? 0xFFAAFFAA : 0xFF888888);
+        drawRect(px + 1, py0, this.width, py0 + 1, 0xFF3A444E);
+        drawRect(px + 1, py1 - 1, this.width, py1, 0xFF2A323C);
+        this.fontRenderer.drawString("工具", px + 12, 40, 0xFFFFFFFF);
+        this.fontRenderer.drawString("?", px + PANEL_W - 22, 40, helpOpen ? 0xFFAAFFAA : 0xFF888888);
+        drawRect(px + 10, 54, px + PANEL_W - 10, 55, 0xFF232A32);
 
         // 只读按钮显示状态
-        String lo = TOOL_LABELS[6] + (readOnly ? "开" : "关");
+        String lo = "只读: " + (readOnly ? "开" : "关");
         for (int i = 0; i < TOOL_LABELS.length; i++) {
             int[] r = toolRect(i);
             String label = i == 6 ? lo : TOOL_LABELS[i];
@@ -483,6 +492,7 @@ public class ChunkOpsEditorScreen extends GuiScreen {
 
         // ---- 缩放滑块（对数 0.5..32） ----
         int sy = sliderY();
+        drawRect(px + 10, sy - 14, px + PANEL_W - 10, sy - 13, 0xFF232A32);
         this.fontRenderer.drawString("缩放", px + 12, sy, 0xFFAAAAAA);
         zoomSliderX = px + 44;
         zoomSliderY = sy + 5;
@@ -498,6 +508,7 @@ public class ChunkOpsEditorScreen extends GuiScreen {
 
         // ---- 统计区 ----
         int sty = statsY();
+        drawRect(px + 10, sty - 14, px + PANEL_W - 10, sty - 13, 0xFF232A32);
         this.fontRenderer.drawString("统计", px + 12, sty, 0xFFAAAAAA);
         drawRect(listX(), sty + 12, listX() + listW(), sty + 28, 0xFF20262C);
         this.fontRenderer.drawString("过滤:", listX() + 2, sty + 15, 0xFF888888);
