@@ -386,6 +386,15 @@ public class ExactMapCollector {
         } catch (Exception ignored) {
             // 部分方块 getMapColor 异常 → 兜底色
         }
+        // 透明方块（MapColor.AIR = 0，如玻璃）→ 用纹理色替代，避免画成黑
+        if ((base & 0xFFFFFF) == 0) {
+            try {
+                int sid = net.minecraft.block.Block.BLOCK_STATE_IDS.get(st);
+                int tc = MapColorCache.staticColorFor(sid);
+                if ((tc & 0xFFFFFF) != 0) base = tc & 0xFFFFFF;
+            } catch (Exception ignored) {
+            }
+        }
         int tint = 0xFFFFFF;
         try {
             Minecraft mc = Minecraft.getMinecraft();

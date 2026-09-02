@@ -38,9 +38,20 @@ public class MapColorCache {
         return color;
     }
 
+    private static final MapColorCache STATIC = new MapColorCache();
+
+    /** 共享实例的取色（供非 GUI 线程如精确采集器使用）。 */
+    public static int staticColorFor(int stateId) {
+        return STATIC.colorFor(stateId);
+    }
+
     int computeColor(int stateId) {
         try {
-            IBlockState state = Block.getStateById(stateId);
+            // 关键：stateId = 存档 palette 项（id<<4|meta）。Forge 1.12.2 的 Block.getStateById
+            // 被重定义为 id&4095 + (id>>>12)&15 语义（与 getStateId=id+meta<<12 配套），
+            // 与 JEID palette 项约定不一致 → 用它拿到的会是**错方块**（沙 192→192 号方块→橙，
+            // 树/玻璃等全乱）。正确做法=游戏读 palette 用的同一张表 BLOCK_STATE_IDS.getByValue。
+            IBlockState state = (IBlockState) Block.BLOCK_STATE_IDS.getByValue(stateId);
             if (state == null) return 0xFF888888;
             // MapColor 优先（=原版地图该方块的色：水=蓝/草=浅绿/岩浆=橙…），与精确层底色一致，
             // 解决"纹理中心色"的通道错乱/品红问题（水变紫等）。通用灰/金属色例外（见下）。
