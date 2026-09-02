@@ -34,6 +34,10 @@ public class Mcops {
     public static final java.util.concurrent.atomic.AtomicInteger lastExportUnknown =
             new java.util.concurrent.atomic.AtomicInteger(0);
 
+    /** 最近一次 exportChunks 中含未知 stateId 的 chunk 键（(x<<32)|z）。 */
+    public static final java.util.Set<Long> lastExportUnknownChunks =
+            java.util.Collections.synchronizedSet(new java.util.HashSet<Long>());
+
     /** 导入报告。 */
     public static class ImportReport {
         public int chunks = 0;
@@ -59,6 +63,7 @@ public class Mcops {
     public static byte[] exportChunks(List<NbtNode> chunkRoots, RegistrySnapshot snap,
                                       String fingerprint, String note) throws IOException {
         lastExportUnknown.set(0);
+        lastExportUnknownChunks.clear();
         NbtNode root = NbtNode.compound();
         root.asMap().put("Format", NbtNode.intNode(FORMAT));
         root.asMap().put("Kind", NbtNode.stringNode("chunks"));
@@ -100,6 +105,7 @@ public class Mcops {
         out.asMap().put("Pos", pos);
 
         if (level != null) {
+            int before = lastExportUnknown.get();
             // Sections → 名称化 palette
             NbtNode sectionsOut = NbtNode.list();
             sectionsOut.listElemType = NbtNode.TAG_COMPOUND;
@@ -112,6 +118,9 @@ public class Mcops {
                 }
             }
             out.asMap().put("Sections", sectionsOut);
+            if (lastExportUnknown.get() > before) {
+                lastExportUnknownChunks.add(((long) x << 32) | (z & 0xFFFFFFFFL));
+            }
 
             // Biomes → 名称
             NbtNode biomes = level.get("Biomes");

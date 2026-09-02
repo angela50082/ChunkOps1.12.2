@@ -764,9 +764,20 @@ public class ChunkOpsEditorScreen extends GuiScreen {
                     + clipOriginCx + "," + clipOriginCz + "）" : "复制失败");
             int unknownN = com.chunkops.core.Mcops.lastExportUnknown.get();
             if (unknownN > 0) {
-                logLine("[警告] 源区有 " + unknownN + " 种方块编号当前会话不认识——这些多半是旧会话写入、"
-                        + "且注册号每次启动都不同的方块（EnderIO/Forestry/quark 类，实测漂移）；"
-                        + "旧编号已无法按当前注册表还原，需在当前会话重新放置这些方块后再复制");
+                logLine("[警告] 源区 " + unknownN + " 种方块编号会话不认识");
+                java.util.List<Long> keys = new java.util.ArrayList<Long>(
+                        com.chunkops.core.Mcops.lastExportUnknownChunks);
+                java.util.Collections.sort(keys);
+                int shown = Math.min(keys.size(), 4);
+                StringBuilder sb = new StringBuilder("含未知编号区块: ");
+                for (int i = 0; i < shown; i++) {
+                    long k = keys.get(i);
+                    sb.append("(" + (int) (k >> 32) + "," + (int) (k & 0xFFFFFFFFL) + ") ");
+                }
+                if (keys.size() > shown) sb.append("等" + keys.size() + "个");
+                logLine(sb.toString());
+                logLine("Quark/林业类方块每次启动编号都变");
+                logLine("建议: 新世界搭建→保存退出(勿关游戏)→再复制");
             }
         } else if (op.equals("paste")) {
             if (clipboard == null || clipboard.isEmpty() || clipboardNamed == null) {
