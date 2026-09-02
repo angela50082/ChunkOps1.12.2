@@ -169,10 +169,9 @@ public class Mcops {
                 if (stateId == 0) {
                     name = "minecraft:air#0";
                 } else {
-                    int id = stateId >> 4;
-                    int meta = stateId & 15;
-                    String n = snap != null ? snap.lookupBlockName(id) : null;
-                    name = (n != null ? n : "unknown:" + id) + "#" + meta;
+                    // stateId = REID 状态身份序号：快照（state 级，name#meta→stateId）直接查名；查不到→unknown 保留原值
+                    String n = snap != null ? snap.lookupBlockName(stateId) : null;
+                    name = (n != null ? n : "unknown:" + stateId);
                 }
                 idToName.put(stateId, name);
                 palette.add(name);
@@ -338,31 +337,29 @@ public class Mcops {
         return secOut;
     }
 
-    /** "modid:block#meta" → stateId；unknown: 保留原 ID；缺失 → 0 并计数。 */
+    /**
+     * "modid:block#meta" → stateId（REID 状态身份序号；快照 state 级键 = 完整 "name#meta"）。
+     * unknown:N 保留原 stateId（快照重建前的旧数据兼容）；缺失 → 0 并计数。
+     */
     static int nameToStateId(String name, RegistrySnapshot snap, ImportReport report) {
-        int meta = 0;
-        int hash = name.lastIndexOf('#');
-        if (hash >= 0) {
-            try {
-                meta = Integer.parseInt(name.substring(hash + 1));
-            } catch (NumberFormatException ignored) { }
-            name = name.substring(0, hash);
-        }
         if (name.startsWith("unknown:")) {
             try {
-                int id = Integer.parseInt(name.substring("unknown:".length()));
-                return id << 4 | meta;
+                return Integer.parseInt(name.substring("unknown:".length()));
             } catch (NumberFormatException ignored) {
                 return 0;
             }
         }
-        Integer id = snap.lookupBlockId(name);
-        if (id == null) {
+        // 快照为 state 级：先查完整 "name#meta"；不含 # 时退化查 "name#0"
+        Integer sid = snap.lookupBlockId(name);
+        if (sid == null && name.indexOf('#') < 0) {
+            sid = snap.lookupBlockId(name + "#0");
+        }
+        if (sid == null) {
             report.blocksFallenBack++;
             Long c = report.missingPalette.get(name);
             report.missingPalette.put(name, c == null ? 1 : c + 1);
             return 0; // air
         }
-        return id << 4 | meta;
+        return sid.intValue();
     }
 }

@@ -38,21 +38,32 @@ public class ChunkOpsExport {
         root.addProperty("gameVersion", "1.12.2");
         root.addProperty("dataVersion", 1343);
 
-        // blocks（含原版与模组）——关键：REID 环境下运行时 id ≠ Forge 注册表 id（getIdFromBlock），
-        // 必须用 REID 专门 patch 的 Block.getStateId(state)>>4（运行时语义，与存盘一致——实测偏移定案）
+        // blocks（含原版与模组）——REID 语境：存盘 palette 项 = Block.getStateId(state)（state 身份序号），
+        // 与注册表 id（getIdFromBlock/JEI）是两套（观察差 21 的固定偏移）。快照必须建
+        // 「name#meta ↔ stateId」的 state 级映射（遍历每个方块全部 meta 的 getStateId）。
         JsonArray blocks = new JsonArray();
         int maxBlockId = -1;
         int blockCount = 0;
         for (Block b : Block.REGISTRY) {
             ResourceLocation rl = Block.REGISTRY.getNameForObject(b);
             if (rl == null) continue;
-            int id = Block.getStateId(b.getDefaultState()) >> 4;
-            if (id > maxBlockId) maxBlockId = id;
-            JsonObject o = new JsonObject();
-            o.addProperty("name", rl.toString());
-            o.addProperty("id", id);
-            blocks.add(o);
-            blockCount++;
+            String base = rl.toString();
+            for (int m = 0; m < 16; m++) {
+                net.minecraft.block.state.IBlockState st;
+                try {
+                    st = b.getStateFromMeta(m);
+                } catch (Exception e) {
+                    continue;
+                }
+                if (st == null || st.getBlock() != b) continue;
+                int sid = Block.getStateId(st);
+                if (sid > maxBlockId) maxBlockId = sid;
+                JsonObject o = new JsonObject();
+                o.addProperty("name", base + "#" + m);
+                o.addProperty("id", sid);
+                blocks.add(o);
+                blockCount++;
+            }
         }
         root.add("blocks", blocks);
 

@@ -174,12 +174,21 @@ public class GuiOps {
                 for (Block b : Block.REGISTRY) {
                     ResourceLocation rl = Block.REGISTRY.getNameForObject(b);
                     if (rl == null) continue;
-                    com.chunkops.core.RegistrySnapshot.BlockEntry e =
-                            new com.chunkops.core.RegistrySnapshot.BlockEntry();
-                    e.name = rl.toString();
-                    // 运行时 id（REID patch 的 getStateId 语义），非 getIdFromBlock
-                    e.id = Block.getStateId(b.getDefaultState()) >> 4;
-                    s.blocks.add(e);
+                    String base = rl.toString();
+                    for (int m = 0; m < 16; m++) {
+                        net.minecraft.block.state.IBlockState st;
+                        try {
+                            st = b.getStateFromMeta(m);
+                        } catch (Exception e) {
+                            continue;
+                        }
+                        if (st == null || st.getBlock() != b) continue;
+                        com.chunkops.core.RegistrySnapshot.BlockEntry e =
+                                new com.chunkops.core.RegistrySnapshot.BlockEntry();
+                        e.name = base + "#" + m; // 名称#meta → stateId（REID 状态身份序号）
+                        e.id = Block.getStateId(st);
+                        s.blocks.add(e);
+                    }
                 }
                 for (Biome b : Biome.REGISTRY) {
                     ResourceLocation rl = Biome.REGISTRY.getNameForObject(b);
