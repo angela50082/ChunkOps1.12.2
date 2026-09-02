@@ -38,14 +38,15 @@ public class ChunkOpsExport {
         root.addProperty("gameVersion", "1.12.2");
         root.addProperty("dataVersion", 1343);
 
-        // blocks（含原版与模组）
+        // blocks（含原版与模组）——关键：REID 环境下运行时 id ≠ Forge 注册表 id（getIdFromBlock），
+        // 必须用 REID 专门 patch 的 Block.getStateId(state)>>4（运行时语义，与存盘一致——实测偏移定案）
         JsonArray blocks = new JsonArray();
         int maxBlockId = -1;
         int blockCount = 0;
         for (Block b : Block.REGISTRY) {
             ResourceLocation rl = Block.REGISTRY.getNameForObject(b);
             if (rl == null) continue;
-            int id = Block.getIdFromBlock(b);
+            int id = Block.getStateId(b.getDefaultState()) >> 4;
             if (id > maxBlockId) maxBlockId = id;
             JsonObject o = new JsonObject();
             o.addProperty("name", rl.toString());

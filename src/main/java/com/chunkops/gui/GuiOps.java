@@ -177,7 +177,8 @@ public class GuiOps {
                     com.chunkops.core.RegistrySnapshot.BlockEntry e =
                             new com.chunkops.core.RegistrySnapshot.BlockEntry();
                     e.name = rl.toString();
-                    e.id = Block.getIdFromBlock(b);
+                    // 运行时 id（REID patch 的 getStateId 语义），非 getIdFromBlock
+                    e.id = Block.getStateId(b.getDefaultState()) >> 4;
                     s.blocks.add(e);
                 }
                 for (Biome b : Biome.REGISTRY) {
