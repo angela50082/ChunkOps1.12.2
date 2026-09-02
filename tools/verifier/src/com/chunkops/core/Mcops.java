@@ -30,6 +30,10 @@ public class Mcops {
 
     public static final int FORMAT = 1;
 
+    /** 最近一次 exportChunks 中「当前快照查不到名」的未知 stateId 种类数（跨会话编号漂移探测）。 */
+    public static final java.util.concurrent.atomic.AtomicInteger lastExportUnknown =
+            new java.util.concurrent.atomic.AtomicInteger(0);
+
     /** 导入报告。 */
     public static class ImportReport {
         public int chunks = 0;
@@ -54,6 +58,7 @@ public class Mcops {
      */
     public static byte[] exportChunks(List<NbtNode> chunkRoots, RegistrySnapshot snap,
                                       String fingerprint, String note) throws IOException {
+        lastExportUnknown.set(0);
         NbtNode root = NbtNode.compound();
         root.asMap().put("Format", NbtNode.intNode(FORMAT));
         root.asMap().put("Kind", NbtNode.stringNode("chunks"));
@@ -172,6 +177,7 @@ public class Mcops {
                     // stateId = REID 状态身份序号：快照（state 级，name#meta→stateId）直接查名；查不到→unknown 保留原值
                     String n = snap != null ? snap.lookupBlockName(stateId) : null;
                     name = (n != null ? n : "unknown:" + stateId);
+                    if (name.startsWith("unknown:")) lastExportUnknown.incrementAndGet();
                 }
                 idToName.put(stateId, name);
                 palette.add(name);

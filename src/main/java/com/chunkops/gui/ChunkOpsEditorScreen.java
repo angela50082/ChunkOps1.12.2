@@ -762,6 +762,11 @@ public class ChunkOpsEditorScreen extends GuiScreen {
             clipOriginCz = selMinCz;
             logLine(clipboard != null ? "已复制 " + clipboard.size() + " 个区块到剪贴板（名称化，源 "
                     + clipOriginCx + "," + clipOriginCz + "）" : "复制失败");
+            int unknownN = com.chunkops.core.Mcops.lastExportUnknown.get();
+            if (unknownN > 0) {
+                logLine("[警告] 源区有 " + unknownN + " 种方块编号当前会话不认识（旧会话写入的存档）；"
+                        + "请先打开源存档让游戏保存一次再重新复制，否则部分方块会错位");
+            }
         } else if (op.equals("paste")) {
             if (clipboard == null || clipboard.isEmpty() || clipboardNamed == null) {
                 logLine("剪贴板为空（先复制选区）");

@@ -49,11 +49,12 @@ public class ChunkOpsMod {
                     net.minecraft.block.state.IBlockState st = bf.getDefaultState();
                     int rid = net.minecraft.block.Block.getIdFromBlock(bf);
                     int regId = net.minecraft.block.Block.REGISTRY.getIDForObject(bf);
+                    int meta = bf.getMetaFromState(st);
                     int gsid = net.minecraft.block.Block.getStateId(st);
                     int storage = ChunkOpsExport.storageStateId(st);
                     logger.info("[ChunkOps-diag] forestry:fences.vanilla.fireproof.0  "
-                            + "getIdFromBlock={} REGISTRY={} getStateId={} storageStateId={}",
-                            rid, regId, gsid, storage);
+                            + "getIdFromBlock={} REGISTRY={} meta={} getStateId={} storageStateId={}",
+                            rid, regId, meta, gsid, storage);
                 } else {
                     logger.info("[ChunkOps-diag] forestry:fences.vanilla.fireproof.0 未找到");
                 }

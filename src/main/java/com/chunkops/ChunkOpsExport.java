@@ -32,31 +32,20 @@ import java.util.List;
 public class ChunkOpsExport {
 
     /**
-     * 存储级 stateId（与存档 palette 项一致）：
-     * REID 只 patch 了部分路径（公开 API/写盘），而读写存档使用的底层 ObjectIntIdentityMap
-     * 字段名在反混淆环境为 MCP 名（非 SRG）——多候选反射。
+     * 存储级 stateId（与存档 palette 项一致）——2026-09-02 定案（REID 存储表语义根治）：
+     *
+     * JEID/REID 写盘路径（reid$newGetDataForNBT）直接使用 Block.BLOCK_STATE_IDS.get(state)
+     * （即 field_176229_d，MCP 名 BLOCK_STATE_IDS，public static final），其值 = 注册表 id<<4|meta
+     * （vanilla registerBlocks 填充公式，实测存档：stone=16、water=144、mekanism:oreblock#3=112723）。
+     *
+     * 注意：Block.getStateId() 在 Forge 1.12.2 被重定义为 id + meta<<12，与存档值不一致
+     * （实测：stone→1、water→9、forestry fence→526/4622 —— 全部 id<4096 的方块错位根因！
+     * 旧代码反射候选名 "STATE_TO_ID"/"field_176229_d" 等在 MCP 反混淆运行时均不存在，
+     * 一直回退到 getStateId，只对 id≥4096（JEID patch 了 getStateId=(id<<4)|meta）恰好正确）。
+     * BLOCK_STATE_IDS 是 public 字段，直接访问，无需反射。
      */
     public static int storageStateId(net.minecraft.block.state.IBlockState st) {
-        try {
-            java.lang.reflect.Field f = null;
-            for (String fname : new String[]{"field_176229_d", "stateToId", "idToState", "STATE_TO_ID"}) {
-                try {
-                    f = net.minecraft.block.Block.class.getDeclaredField(fname);
-                    break;
-                } catch (NoSuchFieldException ignored) {
-                }
-            }
-            if (f != null) {
-                f.setAccessible(true);
-                Object map = f.get(null);
-                java.lang.reflect.Method get = map.getClass().getMethod("get", Object.class);
-                Object v = get.invoke(map, st);
-                if (v instanceof Number) return ((Number) v).intValue();
-            }
-        } catch (Exception ignored) {
-            // 反射失败回退公开 API
-        }
-        return net.minecraft.block.Block.getStateId(st);
+        return net.minecraft.block.Block.BLOCK_STATE_IDS.get(st);
     }
 
     /** 导出到指定目录下的 registry-snapshot.json。返回输出文件。 */

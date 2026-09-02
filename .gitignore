@@ -22,3 +22,5 @@ test-data/
 # 备份/临时
 *.mcabackup
 *.bak
+
+tools/verify-tmp/
