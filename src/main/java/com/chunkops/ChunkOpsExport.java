@@ -31,6 +31,25 @@ import java.util.List;
  */
 public class ChunkOpsExport {
 
+    /**
+     * 存储级 stateId（与存档 palette 项一致）：
+     * REID 只 patch 了公开 API getStateId（返回运行时重映射值），而写盘/存盘使用底层表
+     * Block.field_176229_d（SRG，= ObjectIntIdentityMap of IBlockState）——必须反射访问。
+     */
+    public static int storageStateId(net.minecraft.block.state.IBlockState st) {
+        try {
+            java.lang.reflect.Field f = net.minecraft.block.Block.class.getDeclaredField("field_176229_d");
+            f.setAccessible(true);
+            Object map = f.get(null);
+            java.lang.reflect.Method get = map.getClass().getMethod("get", Object.class);
+            Object v = get.invoke(map, st);
+            if (v instanceof Number) return ((Number) v).intValue();
+        } catch (Exception ignored) {
+            // 反射失败回退公开 API
+        }
+        return net.minecraft.block.Block.getStateId(st);
+    }
+
     /** 导出到指定目录下的 registry-snapshot.json。返回输出文件。 */
     public static File export(File dir) throws IOException {
         JsonObject root = new JsonObject();
@@ -56,7 +75,7 @@ public class ChunkOpsExport {
                     continue;
                 }
                 if (st == null || st.getBlock() != b) continue;
-                int sid = Block.getStateId(st);
+                int sid = storageStateId(st); // 存储级 stateId（与存档 palette 项一致）
                 if (sid > maxBlockId) maxBlockId = sid;
                 JsonObject o = new JsonObject();
                 o.addProperty("name", base + "#" + m);

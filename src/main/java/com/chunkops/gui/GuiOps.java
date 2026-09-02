@@ -185,8 +185,8 @@ public class GuiOps {
                         if (st == null || st.getBlock() != b) continue;
                         com.chunkops.core.RegistrySnapshot.BlockEntry e =
                                 new com.chunkops.core.RegistrySnapshot.BlockEntry();
-                        e.name = base + "#" + m; // 名称#meta → stateId（REID 状态身份序号）
-                        e.id = Block.getStateId(st);
+                        e.name = base + "#" + m; // 名称#meta → 存储级 stateId（与存档 palette 项一致）
+                        e.id = com.chunkops.ChunkOpsExport.storageStateId(st);
                         s.blocks.add(e);
                     }
                 }
