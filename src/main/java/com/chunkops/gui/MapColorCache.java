@@ -1,6 +1,10 @@
 package com.chunkops.gui;
 
 import net.minecraft.block.Block;
+import net.minecraft.block.BlockGrass;
+import net.minecraft.block.BlockLeaves;
+import net.minecraft.block.BlockLiquid;
+import net.minecraft.block.BlockTallGrass;
 import net.minecraft.block.state.IBlockState;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.block.model.BakedQuad;
@@ -8,6 +12,7 @@ import net.minecraft.client.renderer.block.model.IBakedModel;
 import net.minecraft.util.EnumFacing;
 import net.minecraft.client.renderer.texture.TextureAtlasSprite;
 import net.minecraft.util.math.BlockPos;
+import net.minecraft.world.biome.Biome;
 
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
@@ -89,8 +94,7 @@ public class MapColorCache {
     }
 
     /** 颜色是否有效：alpha 足够且非品红（缺失纹理标志色）。 */
-    private static boolean isValidColor(int c) {
-        if (c == 0) return false;
+    private static boolean isValidColor(int c) {        if (c == 0) return false;
         int a = (c >>> 24) & 0xFF;
         if (a < 128) return false;
         int r = (c >> 16) & 0xFF;
@@ -178,6 +182,57 @@ public class MapColorCache {
         int r = (int) (((argb >> 16) & 0xFF) * f);
         int g = (int) (((argb >> 8) & 0xFF) * f);
         int b = (int) ((argb & 0xFF) * f);
+        return (a << 24) | (r << 16) | (g << 8) | b;
+    }
+
+    // ------------------------------------------------------------ 生物群系调色（地图模组式）
+
+    /** 方块 → 调色类别：1=草 2=树叶 3=水 0=不调色（按方块类识别，覆盖原版及大部分模组子类）。 */
+    private final Map<Integer, Integer> tintCategory = new ConcurrentHashMap<Integer, Integer>();
+
+    public int tintCategory(int blockId) {
+        Integer v = tintCategory.get(blockId);
+        if (v != null) return v;
+        int cat = 0;
+        try {
+            Block b = Block.getBlockById(blockId);
+            if (b instanceof BlockGrass || b instanceof BlockTallGrass) cat = 1;
+            else if (b instanceof BlockLeaves) cat = 2;
+            else if (b instanceof BlockLiquid) cat = 3;
+        } catch (Exception ignored) {
+        }
+        tintCategory.put(blockId, cat);
+        return cat;
+    }
+
+    /** 群系 → {草, 叶, 水} 颜色（运行期首次访问捕获，纯函数无需 world）。 */
+    private final Map<Integer, int[]> biomeColors = new ConcurrentHashMap<Integer, int[]>();
+
+    public int biomeColor(int biomeId, int category) {
+        int[] c = biomeColors.get(biomeId);
+        if (c == null) {
+            c = new int[]{0xFFFFFF, 0xFFFFFF, 0xFFFFFF};
+            try {
+                Biome b = Biome.getBiome(biomeId);
+                if (b != null) {
+                    c[0] = b.getGrassColorAtPos(BlockPos.ORIGIN);
+                    c[1] = b.getFoliageColorAtPos(BlockPos.ORIGIN);
+                    c[2] = b.getWaterColorMultiplier();
+                }
+            } catch (Exception ignored) {
+            }
+            biomeColors.put(biomeId, c);
+        }
+        return category == 1 ? c[0] : (category == 2 ? c[1] : c[2]);
+    }
+
+    /** 颜色 × 生物群系调色（multiplier 每通道 /255）。 */
+    public static int tint(int argb, int multiplier) {
+        if (argb == 0 || multiplier == 0xFFFFFF) return argb;
+        int a = (argb >>> 24) & 0xFF;
+        int r = (((argb >> 16) & 0xFF) * ((multiplier >> 16) & 0xFF)) / 255;
+        int g = (((argb >> 8) & 0xFF) * ((multiplier >> 8) & 0xFF)) / 255;
+        int b = ((argb & 0xFF) * (multiplier & 0xFF)) / 255;
         return (a << 24) | (r << 16) | (g << 8) | b;
     }
 }

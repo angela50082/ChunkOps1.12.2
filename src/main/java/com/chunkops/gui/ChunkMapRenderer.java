@@ -222,12 +222,36 @@ public class ChunkMapRenderer {
             }
             if (secStates.isEmpty()) return null;
 
+            // 生物群系（byte[256] 或 int[256]，JEID 环境可能是 int）——文件级层生物群系调色用
+            int[] biomes = decodeBiomes(level);
+
             // 精确层（游戏内采集 COPM）：有数据列优先，其余列走文件级取色回退
             ExactMapFile.ExactRegion exact = exactRegion(worldDir, rx, rz);
-            return buildTile(secStates, heightMap, exact, (cx & 31) * 16, (cz & 31) * 16);
+            return buildTile(secStates, heightMap, biomes, exact, (cx & 31) * 16, (cz & 31) * 16);
         } catch (Exception e) {
             return null;
         }
+    }
+
+    /** 解码 chunk 的 Biomes → int[256]（每列群系 id）；不可用返回 null。 */
+    private static int[] decodeBiomes(NbtNode level) {
+        try {
+            NbtNode bm = level.get("Biomes");
+            if (bm == null) return null;
+            if (bm.type == NbtNode.TAG_BYTE_ARRAY) {
+                byte[] b = (byte[]) bm.value;
+                if (b.length < 256) return null;
+                int[] out = new int[256];
+                for (int i = 0; i < 256; i++) out[i] = b[i] & 0xFF;
+                return out;
+            }
+            if (bm.type == NbtNode.TAG_INT_ARRAY) {
+                int[] v = (int[]) bm.value;
+                return v.length >= 256 ? v : null;
+            }
+        } catch (Exception ignored) {
+        }
+        return null;
     }
 
     /**
@@ -247,15 +271,18 @@ public class ChunkMapRenderer {
                 if (ids != null) secStates.put(SectionCodec.sectionY(sec), ids);
             }
             if (secStates.isEmpty()) return null;
-            return buildTile(secStates, heightMap, null, 0, 0);
+            return buildTile(secStates, heightMap, null, null, 0, 0);
         } catch (Exception e) {
             return null;
         }
     }
 
-    /** 由 sections + HeightMap + 精确层构建 16×16 颜色 tile（坐标 base 用于精确层索引）。 */
-    private ChunkMapTile buildTile(Map<Integer, int[]> secStates, int[] heightMap,
+    /** 由 sections + HeightMap + 生物群系 + 精确层构建 16×16 颜色 tile（坐标 base 用于精确层索引）。 */
+    private ChunkMapTile buildTile(Map<Integer, int[]> secStates, int[] heightMap, int[] biomes,
                                    ExactMapFile.ExactRegion exact, int baseX, int baseZ) {        ChunkMapTile tile = new ChunkMapTile();
+        // 先算每列地表 y（供文件级取色 + 坡度立体感）
+        int[] ys = new int[256];
+        for (int col = 0; col < 256; col++) ys[col] = findSurfaceY(secStates, heightMap, col);
         for (int z = 0; z < 16; z++) {
             for (int x = 0; x < 16; x++) {
                 int col = z * 16 + x;
@@ -281,23 +308,38 @@ public class ChunkMapRenderer {
                         }
                     }
                 }
-                int y = findSurfaceY(secStates, heightMap, col);
-                int stateId = 0;
-                if (y >= 0) {
-                    int[] ids = secStates.get(y >> 4);
-                    if (ids != null) {
-                        stateId = ids[((y & 15) << 8) | col];
-                    }
+                int y = ys[col];
+                if (y < 0) {
+                    tile.colors[col] = BACKGROUND;
+                    continue;
                 }
+                int[] ids = secStates.get(y >> 4);
+                int stateId = (ids != null) ? ids[((y & 15) << 8) | col] : 0;
                 if (stateId == 0) {
                     tile.colors[col] = BACKGROUND;
-                } else {
-                    int c = colors.colorFor(stateId);
-                    tile.colors[col] = MapColorCache.shade(c, Math.max(0, Math.min(255, y)));
+                    continue;
                 }
+                // 文件级：MapColor 基础色 → 生物群系调色（草/叶/水）→ 高度+坡度立体感
+                int c = colors.colorFor(stateId);
+                if (biomes != null) {
+                    int cat = colors.tintCategory(stateId >> 4);
+                    if (cat != 0) c = MapColorCache.tint(c, colors.biomeColor(biomes[col], cat));
+                }
+                int hh = Math.max(0, Math.min(255, y));
+                tile.colors[col] = MapColorCache.shadeRelief(c, hh,
+                        ysNb(ys, col, +1, hh), ysNb(ys, col, -1, hh),
+                        ysNb(ys, col, -16, hh), ysNb(ys, col, +16, hh));
             }
         }
         return tile;
+    }
+
+    /** 文件级 tile 邻列地表高（越界用自身，防 chunk 边缘缝隙）。 */
+    private static int ysNb(int[] ys, int col, int off, int fallback) {
+        int n = col + off;
+        if (n < 0 || n >= 256) return fallback;
+        int v = ys[n];
+        return v < 0 ? fallback : v;
     }
 
     /** 精确层邻列高度（越界/无数据 → fallback 自身高度，避免边缘缝隙）。 */
