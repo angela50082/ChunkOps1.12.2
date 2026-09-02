@@ -255,8 +255,7 @@ public class ChunkMapRenderer {
 
     /** 由 sections + HeightMap + 精确层构建 16×16 颜色 tile（坐标 base 用于精确层索引）。 */
     private ChunkMapTile buildTile(Map<Integer, int[]> secStates, int[] heightMap,
-                                   ExactMapFile.ExactRegion exact, int baseX, int baseZ) {
-        ChunkMapTile tile = new ChunkMapTile();
+                                   ExactMapFile.ExactRegion exact, int baseX, int baseZ) {        ChunkMapTile tile = new ChunkMapTile();
         for (int z = 0; z < 16; z++) {
             for (int x = 0; x < 16; x++) {
                 int col = z * 16 + x;
@@ -268,7 +267,13 @@ public class ChunkMapRenderer {
                             // 精确层：v2 起数据存原色，高度明暗显示端统一应用；v1 旧数据已含 shade 不再叠加
                             int c = exact.color[gi];
                             if (exact.version >= 2) {
-                                c = MapColorCache.shade(c, exact.heightY[gi] & 0xFF);
+                                int h = exact.heightY[gi] & 0xFF;
+                                // 坡度立体感：东/西/北/南邻列高度（越界用自身，避免 region 边缘缝隙）
+                                c = MapColorCache.shadeRelief(c, h,
+                                        hgt(exact, baseX + x + 1, baseZ + z, h),
+                                        hgt(exact, baseX + x - 1, baseZ + z, h),
+                                        hgt(exact, baseX + x, baseZ + z - 1, h),
+                                        hgt(exact, baseX + x, baseZ + z + 1, h));
                             }
                             tile.colors[col] = c;
                             tile.exactCols++;
@@ -293,6 +298,14 @@ public class ChunkMapRenderer {
             }
         }
         return tile;
+    }
+
+    /** 精确层邻列高度（越界/无数据 → fallback 自身高度，避免边缘缝隙）。 */
+    private static int hgt(ExactMapFile.ExactRegion exact, int x, int z, int fallback) {
+        if (x < 0 || z < 0 || x >= exact.width || z >= exact.height) return fallback;
+        int gi = z * exact.width + x;
+        if (gi < 0 || gi >= exact.heightY.length) return fallback;
+        return exact.heightY[gi] & 0xFF;
     }
 
     /**

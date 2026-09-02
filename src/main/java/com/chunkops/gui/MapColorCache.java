@@ -141,6 +141,23 @@ public class MapColorCache {
     public static int shade(int argb, int y) {
         if (argb == 0) return 0;
         double f = 0.92 + 0.08 * (y / 255.0);
+        return scale(argb, f);
+    }
+
+    /**
+     * 立体感明暗（精确层）：高度亮度 + 坡度阴影（光从西北）。
+     * 东/南邻域较高 → 该列处于坡地迎光面 → 提亮；反之背光 → 压暗。参数为邻列高度。
+     */
+    public static int shadeRelief(int argb, int y, int hE, int hW, int hN, int hS) {
+        if (argb == 0) return 0;
+        double base = 0.92 + 0.08 * (y / 255.0);
+        double slope = ((hE - hW) + (hS - hN)) * 0.014;
+        double f = base + slope;
+        f = f < 0.66 ? 0.66 : (f > 1.24 ? 1.24 : f);
+        return scale(argb, f);
+    }
+
+    private static int scale(int argb, double f) {
         int a = (argb >>> 24) & 0xFF;
         int r = (int) (((argb >> 16) & 0xFF) * f);
         int g = (int) (((argb >> 8) & 0xFF) * f);

@@ -54,6 +54,8 @@ public class ExactMapCollector {
     private final ConcurrentHashMap<String, Long> collected = new ConcurrentHashMap<String, Long>();
     /** 已入队/采集中（防重复入队；完成后移除）。 */
     private final java.util.Set<String> pendingKeys = ConcurrentHashMap.newKeySet();
+    /** 预取时确认磁盘无此区块（避免反复入队；游戏生成后由玩家路径正常采集）。 */
+    private final java.util.Set<String> absentChunks = ConcurrentHashMap.newKeySet();
     /** 已变化待重采的 chunk（方块放置/破坏/爆炸事件标记；成功重采后移除）。 */
     private final java.util.Set<String> dirtyChunks = ConcurrentHashMap.newKeySet();
     private final LinkedBlockingQueue<Task> queue = new LinkedBlockingQueue<Task>();
@@ -182,6 +184,30 @@ public class ExactMapCollector {
         }
     }
 
+    // ------------------------------------------------------------ 预取（编辑器可视范围）
+
+    /**
+     * 编辑器预取（2026-09-02，扩大精确层覆盖）：把范围内磁盘已存在的区块送入采集队列。
+     * 只读不生成（worker 内 loadChunk 仅读盘）；已采集/已入队跳过；主线程安全调用。
+     * @return 本次新入队数
+     */
+    public int prefetch(WorldServer sw, int minCx, int minCz, int maxCx, int maxCz) {
+        int n = 0;
+        for (int cz = minCz; cz <= maxCz; cz++) {
+            for (int cx = minCx; cx <= maxCx; cx++) {
+                String key = keyFor(sw, cx, cz);
+                if (collected.containsKey(key) || pendingKeys.contains(key) || absentChunks.contains(key)) continue;
+                if (!pendingKeys.add(key)) continue;
+                if (!queue.offer(new Task(sw, cx, cz, key))) {
+                    pendingKeys.remove(key);
+                } else {
+                    n++;
+                }
+            }
+        }
+        return n;
+    }
+
     // ------------------------------------------------------------ 入队
 
     /** 入队（去重由 pendingKeys 保证；不标记完成——完成以写盘成功为准，失败可重试）。 */
@@ -218,11 +244,11 @@ public class ExactMapCollector {
     // ------------------------------------------------------------ 采集
 
     private static class Task {
-        final WorldClient world;
+        final World world;
         final int cx, cz;
         final String key;
 
-        Task(WorldClient world, int cx, int cz, String key) {
+        Task(World world, int cx, int cz, String key) {
             this.world = world;
             this.cx = cx;
             this.cz = cz;
@@ -259,7 +285,18 @@ public class ExactMapCollector {
                 collected.put(key, Long.valueOf(0L)); // 多人/无存档：放弃采集（标记完成避免反复排队）
                 return;
             }
-            Chunk chunk = world.getChunk(cx, cz);
+            Chunk chunk;
+            if (world instanceof WorldServer) {
+                // 服务端世界（编辑器预取）：loadChunk 仅读磁盘——不生成地形；磁盘无此区块则跳过
+                chunk = ((net.minecraft.world.gen.ChunkProviderServer)
+                        ((WorldServer) world).getChunkProvider()).loadChunk(cx, cz);
+                if (chunk == null) {
+                    absentChunks.add(key); // 磁盘无此区块：预取跳过（避免反复入队）
+                    return;
+                }
+            } else {
+                chunk = world.getChunk(cx, cz);
+            }
             if (chunk == null || !chunk.isLoaded()) return; // 已卸载：不标记 → 下次加载重采
             int rx = Math.floorDiv(cx, 32);
             int rz = Math.floorDiv(cz, 32);

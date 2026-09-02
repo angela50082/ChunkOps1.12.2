@@ -28,6 +28,11 @@ public class ChunkOpsMod {
     /** 精确数据层采集器（P2）：生命周期与客户端一致。 */
     private static ExactMapCollector exactCollector;
 
+    /** 编辑器预取接入点（null=未注册）。 */
+    public static ExactMapCollector getExactCollector() {
+        return exactCollector;
+    }
+
     @Mod.EventHandler
     public void preInit(FMLPreInitializationEvent event) {
         logger = event.getModLog();
