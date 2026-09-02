@@ -58,6 +58,11 @@ public class GuiOps {
 
     /**
      * 复制选区：读取 chunk 原始 payload 到内存剪贴板（同模组集原样）。
+     *
+     * 跨会话编号漂移说明（2026-09-02 实测定案）：部分模组（EnderIO/Forestry/quark/玄钢类）
+     * 每次启动注册号都变；旧会话写入的这类方块编号在当前会话无法解码（unknown → 保留原值），
+     * 且**绝不能**尝试经游戏读盘+重存"修复"——旧编号可能被当前表误读成别的方块并写回磁盘，
+     * 会损坏源存档。正确做法：用户在当前会话重建这些方块后再复制。
      */
     public static java.util.Map<Long, byte[]> copyArea(File worldDir, int minCx, int maxCx, int minCz, int maxCz) {
         java.util.Map<Long, byte[]> clipboard = new java.util.HashMap<Long, byte[]>();
