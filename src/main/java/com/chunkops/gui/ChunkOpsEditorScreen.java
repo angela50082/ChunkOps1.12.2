@@ -142,43 +142,6 @@ public class ChunkOpsEditorScreen extends GuiScreen {
         worldMenuOpen = false;
     }
 
-    // ------------------------------------------------------------ 精确层预取（扩大覆盖）
-
-    private int prefetchTick = 0;
-    private int prefetchDone = 0;
-    private static final int PREFETCH_CAP = 256; // 单会话预取上限（内存可控）
-
-    /** 编辑器打开时：若当前查看的存档=加载中的世界，把可视区已存在区块送入精确采集队列（只读不生成）。 */
-    @Override
-    public void updateScreen() {
-        super.updateScreen();
-        try {
-            if ((++prefetchTick % 15) != 0) return;   // 每 15 tick (~0.75s) 一次
-            if (prefetchDone >= PREFETCH_CAP) return;
-            if (currentWorldDir == null) return;
-            net.minecraft.server.MinecraftServer server =
-                    net.minecraftforge.fml.common.FMLCommonHandler.instance().getMinecraftServerInstance();
-            if (server == null || server.getWorld(0) == null) return;
-            File loadedDir = server.getWorld(0).getSaveHandler().getWorldDirectory();
-            if (loadedDir == null) return;
-            if (!currentWorldDir.getCanonicalFile().equals(loadedDir.getCanonicalFile())) return;
-            double ppb = zoom;
-            int minCx = (int) Math.floor((viewX - (double) mapCenterX() / ppb) / 16) - 2;
-            int maxCx = (int) Math.floor((viewX + (double) mapCenterX() / ppb) / 16) + 2;
-            int minCz = (int) Math.floor((viewZ - (double) (this.height - 60) / 2 / ppb) / 16) - 2;
-            int maxCz = (int) Math.floor((viewZ + (double) (this.height - 60) / 2 / ppb) / 16) + 2;
-            // 极端缩放保护
-            if (maxCx - minCx > 48) maxCx = minCx + 48;
-            if (maxCz - minCz > 32) maxCz = minCz + 32;
-            com.chunkops.exact.ExactMapCollector c = com.chunkops.ChunkOpsMod.getExactCollector();
-            if (c == null) return;
-            int n = c.prefetch(server.getWorld(0), minCx, minCz, maxCx, maxCz);
-            prefetchDone = Math.min(PREFETCH_CAP, prefetchDone + n);
-        } catch (Exception ignored) {
-            // 预取失败静默（主流程不受影响）
-        }
-    }
-
     @Override
     public void drawScreen(int mouseX, int mouseY, float partialTicks) {
         // GL 状态防御：确保无残留 color/alpha 影响后续纹理渲染
@@ -200,7 +163,6 @@ public class ChunkOpsEditorScreen extends GuiScreen {
         int maxCz = (int) Math.floor((viewZ + (double) (mapBottom - mapTop) / 2 / ppb) / 16);
         int loadedCount = 0;
         int pendingCount = 0;
-        int exactCount = 0;
         if (currentWorldDir != null) {
             // 顶点色批量渲染（与 drawRect 同路径，100% 正常；绕开 DynamicTexture 在整合包环境的暗化）
             java.util.List<int[]> visible = new java.util.ArrayList<int[]>(); // [sx, sy, px, py, color]
@@ -213,7 +175,6 @@ public class ChunkOpsEditorScreen extends GuiScreen {
                     if (tile != null) {
                         collectTileQuads(visible, tile, sx, sy, size);
                         loadedCount++;
-                        exactCount += tile.exactCols;
                     } else {
                         visible.add(new int[]{sx, sy, size, size, renderer.pendingColor()});
                         pendingCount++;
@@ -318,8 +279,8 @@ public class ChunkOpsEditorScreen extends GuiScreen {
                         wbx + 6, ry + 4, hov ? 0xFFFFFFFF : 0xFFCCCCCC);
             }
         }
-        this.fontRenderer.drawString(String.format("%d 个存档 | 已加载 %d 区块 | 加载中 %d | 精确层 %d 列",
-                worlds.size(), loadedCount, pendingCount, exactCount), 234, 10, 0xFF9FA6AD);
+        this.fontRenderer.drawString(String.format("%d 个存档 | 已加载 %d 区块 | 加载中 %d",
+                worlds.size(), loadedCount, pendingCount), 234, 10, 0xFF9FA6AD);
 
         // ---- 底部栏（坐标/帮助） ----
         drawRect(0, this.height - 30, this.width, this.height, 0xE0101418);

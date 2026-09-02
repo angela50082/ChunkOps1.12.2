@@ -323,24 +323,6 @@ public class GuiOps {
                     lastErr = ex.getMessage();
                 }
             }
-            // 精确层数据失效：粘贴区已变——删除受影响 region 的 COPM 缓存
-            // （渲染回退到磁盘解码=最新内容；采集器会在玩家靠近时重采）。2026-09-02 实测：
-            // 粘贴后编辑器地图仍显示旧精确层（13:38 旧会话采集）导致"方块被替换"假象。
-            try {
-                File gameDir = worldDir.getParentFile() == null ? null : worldDir.getParentFile().getParentFile();
-                if (gameDir != null) {
-                    java.util.Set<String> doneKeys = new java.util.HashSet<String>();
-                    for (Object[] rwObj : regionWriters.values()) {
-                        String rk = (String) rwObj[2];
-                        if (!doneKeys.add(rk)) continue;
-                        String[] p = rk.split(",");
-                        File f = new File(new File(new File(gameDir, "chunkops/map"), worldDir.getName()),
-                                "0" + File.separator + "r." + p[0] + "." + p[1] + ".dat");
-                        if (f.isFile() && !f.delete()) System.out.println("[ChunkOps] 精确层缓存删除失败: " + f);
-                    }
-                }
-            } catch (Exception ignored) {
-            }
             // 回读校验（防御）：写入的 chunk 必须可重新完整解析
             int verifyFail = 0;
             for (Object[] rwObj : regionWriters.values()) {

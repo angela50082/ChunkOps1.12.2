@@ -69,15 +69,9 @@ public class ChunkOpsMod {
         } catch (Exception e) {
             logger.error("registry-snapshot 导出失败", e);
         }
-        // 精确数据层采集器（P2）：ChunkEvent.Load（Forge bus）+ ClientTick 兜底（FML bus）
-        try {
-            exactCollector = new ExactMapCollector();
-            MinecraftForge.EVENT_BUS.register(exactCollector);
-            FMLCommonHandler.instance().bus().register(exactCollector);
-            logger.info("ExactMapCollector registered");
-        } catch (Exception e) {
-            logger.error("ExactMapCollector 注册失败", e);
-        }
+        // 精确数据层采集器（P2）：已退役（2026-09-02）——文件级现解现算 + 持久缓存已等效并优于
+        // 精确层，采集器不再注册/运行。代码与数据模型保留，供未来"方块级替换/过滤"按需复用。
+        // （原：ChunkEvent.Load + ClientTick 兜底采集 COPM 到 chunkops/map/…）
     }
 
     @Mod.EventHandler

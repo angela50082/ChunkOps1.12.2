@@ -1,6 +1,5 @@
 package com.chunkops.gui;
 
-import com.chunkops.core.ExactMapFile;
 import com.chunkops.core.RegionWriter;
 import com.chunkops.core.SectionCodec;
 import com.chunkops.verify.NbtNode;
@@ -23,7 +22,8 @@ import java.util.concurrent.ThreadFactory;
  * 2D 区块地图渲染器（阶段 3）：
  * - 文件级读取 region（不经游戏世界加载，大存档流畅）
  * - 地表取列：优先 HeightMap(int[256])，缺失时从 y=255 向下扫描
- * - 取色：MapColorCache（IBakedModel 顶面纹理中心像素 + 高度明暗）
+ * - 取色：MapColor × 生物群系调色 × 高度+坡度明暗（地图模组式）
+ * - 持久缓存：MapTileCache 每 chunk bake 最终像素落盘（按 region 头时间戳失效）
  * - 异步：线程池加载 chunk → 主线程 pump 收割 → DynamicTexture 缓存
  * - LRU：tile 缓存与纹理缓存均有上限（自动淘汰最旧）
  */
@@ -31,19 +31,10 @@ public class ChunkMapRenderer {
 
     private static final int TILE_CACHE_MAX = 16384;   // tile 数据缓存：大存档浏览不驱逐（16MB）
     private static final int TEXTURE_CACHE_MAX = 2048;  // GL 纹理缓存：驱逐后重建很快，不闪烁
-    private static final int EXACT_CACHE_MAX = 64;      // 精确层 region 数据缓存（64×512KB≈32MB）
     private static final int BACKGROUND = 0xFF14181C;
     private static final int PENDING = 0xFF20262C;
 
     private final MapColorCache colors = new MapColorCache();
-
-    /** 精确层（COPM，游戏内采集）region 缓存：文件路径 → 数据。 */
-    private final Map<String, ExactMapFile.ExactRegion> exactRegions =
-            new LinkedHashMap<String, ExactMapFile.ExactRegion>(16, 0.75f, true) {
-                protected boolean removeEldestEntry(Map.Entry<String, ExactMapFile.ExactRegion> eldest) {
-                    return size() > EXACT_CACHE_MAX;
-                }
-            };
 
     private final Map<String, ChunkMapTile> tiles = new LinkedHashMap<String, ChunkMapTile>(256, 0.75f, true) {
         protected boolean removeEldestEntry(Map.Entry<String, ChunkMapTile> eldest) {
@@ -67,10 +58,9 @@ public class ChunkMapRenderer {
         }
     });
 
-    /** 一个 chunk 的 16×16 颜色图。exactCols=精确层（游戏内采集）实际列数。 */
+    /** 一个 chunk 的 16×16 颜色图。 */
     public static class ChunkMapTile {
         public final int[] colors = new int[256];
-        public int exactCols = 0;
     }
 
     static String key(String worldPath, int cx, int cz) {
@@ -85,9 +75,6 @@ public class ChunkMapRenderer {
         }
         tiles.clear();
         textures.clear();
-        synchronized (exactRegions) {
-            exactRegions.clear();
-        }
     }
 
     /**
@@ -167,32 +154,12 @@ public class ChunkMapRenderer {
     }
 
     /**
-     * 精确层 region 数据（COPM，游戏内采集）：saves/&lt;世界名&gt; → gameDir/chunkops/map/&lt;世界名&gt;/0/。
-     * 不存在/不可读返回 null（编辑器回退到文件级取色）。LRU 缓存。
+     * 精确层已退役（2026-09-02）：文件级现解现算 + 持久缓存已等效并优于精确层。
      */
-    ExactMapFile.ExactRegion exactRegion(File worldDir, int rx, int rz) {
-        File gameDir = worldDir.getParentFile() == null ? null : worldDir.getParentFile().getParentFile();
-        if (gameDir == null || !gameDir.isDirectory()) return null;
-        File f = new File(new File(new File(gameDir, "chunkops/map"), worldDir.getName()), "0");
-        f = new File(f, ExactMapFile.fileName(rx, rz));
-        String path = f.getAbsolutePath();
-        synchronized (exactRegions) {
-            ExactMapFile.ExactRegion r = exactRegions.get(path);
-            if (r != null) return r;
-            try {
-                r = ExactMapFile.read(f);
-            } catch (Exception e) {
-                return null;
-            }
-            if (r == null) return null;
-            exactRegions.put(path, r);
-            return r;
-        }
-    }
 
     // ------------------------------------------------------------ load
 
-    /** 后台线程：加载一个 chunk 的 16×16 地表颜色图。 */
+    /** 后台线程：加载一个 chunk 的 16×16 地表颜色图（持久缓存优先，未命中解码+bake）。 */
     ChunkMapTile loadTile(File worldDir, int cx, int cz) {
         try {
             int rx = Math.floorDiv(cx, 32);
@@ -201,6 +168,22 @@ public class ChunkMapRenderer {
             if (!region.isFile()) return null;
             RegionReader rr = new RegionReader(region);
             int index = (cz & 31) * 32 + (cx & 31);
+
+            // 持久缓存（按 region 头时间戳失效）
+            File gameDir = worldDir.getParentFile() == null ? null : worldDir.getParentFile().getParentFile();
+            if (gameDir != null) {
+                int ts = rr.getChunkTimestamp(index);
+                if (ts != 0) {
+                    File cf = MapTileCache.fileFor(gameDir, worldDir.getName(), cx, cz);
+                    int[] cached = MapTileCache.load(cf, ts);
+                    if (cached != null) {
+                        ChunkMapTile t = new ChunkMapTile();
+                        System.arraycopy(cached, 0, t.colors, 0, 256);
+                        return t;
+                    }
+                }
+            }
+
             byte[] payload = rr.readChunkData(index);
             if (payload == null) return null;
             NbtNode root = RegionWriter.unpackChunk(payload);
@@ -225,9 +208,16 @@ public class ChunkMapRenderer {
             // 生物群系（byte[256] 或 int[256]，JEID 环境可能是 int）——文件级层生物群系调色用
             int[] biomes = decodeBiomes(level);
 
-            // 精确层（游戏内采集 COPM）：有数据列优先，其余列走文件级取色回退
-            ExactMapFile.ExactRegion exact = exactRegion(worldDir, rx, rz);
-            return buildTile(secStates, heightMap, biomes, exact, (cx & 31) * 16, (cz & 31) * 16);
+            ChunkMapTile tile = buildTile(secStates, heightMap, biomes);
+
+            // 写回持久缓存
+            if (gameDir != null) {
+                int ts = rr.getChunkTimestamp(index);
+                if (ts != 0) {
+                    MapTileCache.save(MapTileCache.fileFor(gameDir, worldDir.getName(), cx, cz), ts, tile.colors);
+                }
+            }
+            return tile;
         } catch (Exception e) {
             return null;
         }
@@ -255,8 +245,7 @@ public class ChunkMapRenderer {
     }
 
     /**
-     * 从内存 chunk NBT（如剪贴板）构建 tile：无精确层（null），纯文件级取色。
-     * 供粘贴预览使用（粘贴内容仍是原版 NBT，无需读盘）。
+     * 从内存 chunk NBT（如剪贴板）构建 tile（粘贴预览用，无需读盘）。
      */
     public ChunkMapTile tileFromMemory(NbtNode level) {
         try {
@@ -271,43 +260,21 @@ public class ChunkMapRenderer {
                 if (ids != null) secStates.put(SectionCodec.sectionY(sec), ids);
             }
             if (secStates.isEmpty()) return null;
-            return buildTile(secStates, heightMap, null, null, 0, 0);
+            return buildTile(secStates, heightMap, null);
         } catch (Exception e) {
             return null;
         }
     }
 
-    /** 由 sections + HeightMap + 生物群系 + 精确层构建 16×16 颜色 tile（坐标 base 用于精确层索引）。 */
-    private ChunkMapTile buildTile(Map<Integer, int[]> secStates, int[] heightMap, int[] biomes,
-                                   ExactMapFile.ExactRegion exact, int baseX, int baseZ) {        ChunkMapTile tile = new ChunkMapTile();
-        // 先算每列地表 y（供文件级取色 + 坡度立体感）
+    /** 由 sections + HeightMap + 生物群系构建 16×16 颜色 tile。 */
+    private ChunkMapTile buildTile(Map<Integer, int[]> secStates, int[] heightMap, int[] biomes) {
+        ChunkMapTile tile = new ChunkMapTile();
+        // 先算每列地表 y（供取色 + 坡度立体感）
         int[] ys = new int[256];
         for (int col = 0; col < 256; col++) ys[col] = findSurfaceY(secStates, heightMap, col);
         for (int z = 0; z < 16; z++) {
             for (int x = 0; x < 16; x++) {
                 int col = z * 16 + x;
-                if (exact != null) {
-                    // 越界防御：旧版 256 宽文件（尺寸 bug）的越界列视为无数据 → 回退文件级
-                    if ((baseX + x) < exact.width && (baseZ + z) < exact.height) {
-                        int gi = (baseZ + z) * exact.width + (baseX + x);
-                        if (exact.hasData(gi)) {
-                            // 精确层：v2 起数据存原色，高度明暗显示端统一应用；v1 旧数据已含 shade 不再叠加
-                            int c = exact.color[gi];
-                            if (exact.version >= 2) {
-                                int h = exact.heightY[gi] & 0xFF;
-                                // 坡度立体感：东/西/北/南邻列高度（越界用自身，避免 region 边缘缝隙）
-                                c = MapColorCache.shadeRelief(c, h,
-                                        hgt(exact, baseX + x + 1, baseZ + z, h),
-                                        hgt(exact, baseX + x - 1, baseZ + z, h),
-                                        hgt(exact, baseX + x, baseZ + z - 1, h),
-                                        hgt(exact, baseX + x, baseZ + z + 1, h));
-                            }
-                            tile.colors[col] = c;
-                            tile.exactCols++;
-                            continue;
-                        }
-                    }
-                }
                 int y = ys[col];
                 if (y < 0) {
                     tile.colors[col] = BACKGROUND;
@@ -340,14 +307,6 @@ public class ChunkMapRenderer {
         if (n < 0 || n >= 256) return fallback;
         int v = ys[n];
         return v < 0 ? fallback : v;
-    }
-
-    /** 精确层邻列高度（越界/无数据 → fallback 自身高度，避免边缘缝隙）。 */
-    private static int hgt(ExactMapFile.ExactRegion exact, int x, int z, int fallback) {
-        if (x < 0 || z < 0 || x >= exact.width || z >= exact.height) return fallback;
-        int gi = z * exact.width + x;
-        if (gi < 0 || gi >= exact.heightY.length) return fallback;
-        return exact.heightY[gi] & 0xFF;
     }
 
     /**

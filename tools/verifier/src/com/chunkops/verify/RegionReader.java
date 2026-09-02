@@ -78,6 +78,18 @@ public class RegionReader {
         }
     }
 
+    /** 读取指定块索引的时间戳（region 头后 4096 字节的时间戳表；无此区块返回 0）。 */
+    public int getChunkTimestamp(int index) throws IOException {
+        RandomAccessFile raf = new RandomAccessFile(file, "r");
+        try {
+            if (raf.length() < 4096 + 4096) return 0;
+            raf.seek(4096 + index * 4L);
+            return raf.readInt();
+        } finally {
+            raf.close();
+        }
+    }
+
     /** 遍历本 region 中所有存在的 chunk 索引。 */
     public List<Integer> listChunkIndices() throws IOException {
         List<Integer> result = new ArrayList<Integer>();
