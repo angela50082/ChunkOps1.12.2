@@ -47,6 +47,11 @@ public class ChunkMapRenderer {
         }
     };
     private final Map<String, Future<ChunkMapTile>> pending = new HashMap<String, Future<ChunkMapTile>>();
+    /** 负缓存：磁盘不存在的 chunk（虚空/未探索），会话内不再反复提交加载任务（2026-09-03 卡顿根因修复）。 */
+    private final java.util.Set<String> absent = java.util.concurrent.ConcurrentHashMap.newKeySet();
+    /** 每帧新提交任务预算：超限下帧继续（防止放大视野时一次性灌爆线程池队列）。 */
+    private static final int SUBMIT_BUDGET = 160;
+    private int frameSubmitted = 0;
     /** 纹理命名递增序号（主线程专用，保证唯一）。 */
     private int texSeq = 0;
 
@@ -67,7 +72,7 @@ public class ChunkMapRenderer {
         return worldPath + "|" + cx + "," + cz;
     }
 
-    /** 清空全部缓存（切换存档时调用，避免跨世界串图/闪烁）。 */
+    /** 清空全部缓存（切换存档/世界修改时调用；同时清负缓存，允许重试新出现的区块）。 */
     public void clear() {
         synchronized (pending) {
             for (Future<ChunkMapTile> f : pending.values()) f.cancel(true);
@@ -75,18 +80,23 @@ public class ChunkMapRenderer {
         }
         tiles.clear();
         textures.clear();
+        absent.clear();
+        frameSubmitted = 0;
     }
 
     /**
-     * 主线程调用：收割已完成的异步加载，返回 tile（未就绪返回 null 并提交加载）。
+     * 主线程调用：收割已完成的异步加载，返回 tile（未就绪返回 null；无此区块→负缓存跳过，不再提交）。
+     * 调用方每帧应先 pump() 一次。
      */
     public ChunkMapTile getOrLoad(File worldDir, int cx, int cz) {
-        pump();
         String k = key(worldDir.getAbsolutePath(), cx, cz);
         ChunkMapTile tile = tiles.get(k);
         if (tile != null) return tile;
+        if (absent.contains(k)) return null; // 负缓存：磁盘无此区块，不再反复提交
         synchronized (pending) {
             if (!pending.containsKey(k)) {
+                if (frameSubmitted >= SUBMIT_BUDGET) return null; // 本帧预算耗尽：下帧继续
+                frameSubmitted++;
                 final String fWorld = worldDir.getAbsolutePath();
                 final int fx = cx;
                 final int fz = cz;
@@ -100,23 +110,40 @@ public class ChunkMapRenderer {
         return null;
     }
 
-    /** 主线程调用：收割完成的任务。 */
+    /** 主线程调用（每帧一次）：重置预算并收割完成的任务；失败的 chunk 记入负缓存。 */
     public void pump() {
-            synchronized (pending) {
-                Iterator<Map.Entry<String, Future<ChunkMapTile>>> it = pending.entrySet().iterator();
-                while (it.hasNext()) {
-                    Map.Entry<String, Future<ChunkMapTile>> e = it.next();
-                    if (e.getValue().isDone()) {
-                        try {
-                            ChunkMapTile t = e.getValue().get();
-                            if (t != null) tiles.put(e.getKey(), t);
-                        } catch (Exception ignored) {
-                            // 加载失败：不缓存
+        frameSubmitted = 0;
+        synchronized (pending) {
+            Iterator<Map.Entry<String, Future<ChunkMapTile>>> it = pending.entrySet().iterator();
+            while (it.hasNext()) {
+                Map.Entry<String, Future<ChunkMapTile>> e = it.next();
+                if (e.getValue().isDone()) {
+                    try {
+                        ChunkMapTile t = e.getValue().get();
+                        if (t != null) {
+                            tiles.put(e.getKey(), t);
+                        } else {
+                            absent.add(e.getKey()); // 加载失败/无此区块 → 负缓存（本会话不再重试）
                         }
-                        it.remove();
+                    } catch (Exception ignored) {
+                        absent.add(e.getKey());
                     }
+                    it.remove();
                 }
             }
+        }
+    }
+
+    /** 当前排队/执行中的任务数（主线程读）。 */
+    public int queuedCount() {
+        synchronized (pending) {
+            return pending.size();
+        }
+    }
+
+    /** 负缓存大小 = 会话内确认不存在的区块数（主线程读）。 */
+    public int absentCount() {
+        return absent.size();
     }
 
     /** 主线程调用：获取/创建 chunk 纹理（DynamicTexture 16×16，nearest 拉伸由 GL 决定）。 */

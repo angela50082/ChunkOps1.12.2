@@ -162,8 +162,8 @@ public class ChunkOpsEditorScreen extends GuiScreen {
         int minCz = (int) Math.floor((viewZ - (double) (mapBottom - mapTop) / 2 / ppb) / 16);
         int maxCz = (int) Math.floor((viewZ + (double) (mapBottom - mapTop) / 2 / ppb) / 16);
         int loadedCount = 0;
-        int pendingCount = 0;
         if (currentWorldDir != null) {
+            renderer.pump(); // 每帧一次：收割完成的任务 + 重置提交预算
             // 顶点色批量渲染（与 drawRect 同路径，100% 正常；绕开 DynamicTexture 在整合包环境的暗化）
             java.util.List<int[]> visible = new java.util.ArrayList<int[]>(); // [sx, sy, px, py, color]
             for (int cx = minCx; cx <= maxCx; cx++) {
@@ -177,7 +177,6 @@ public class ChunkOpsEditorScreen extends GuiScreen {
                         loadedCount++;
                     } else {
                         visible.add(new int[]{sx, sy, size, size, renderer.pendingColor()});
-                        pendingCount++;
                     }
                 }
             }
@@ -279,8 +278,9 @@ public class ChunkOpsEditorScreen extends GuiScreen {
                         wbx + 6, ry + 4, hov ? 0xFFFFFFFF : 0xFFCCCCCC);
             }
         }
-        this.fontRenderer.drawString(String.format("%d 个存档 | 已加载 %d 区块 | 加载中 %d",
-                worlds.size(), loadedCount, pendingCount), 234, 10, 0xFF9FA6AD);
+        this.fontRenderer.drawString(String.format("%d 个存档 | 已加载 %d 区块 | 排队 %d | 未探索 %d",
+                worlds.size(), loadedCount, renderer.queuedCount(), renderer.absentCount()),
+                234, 10, 0xFF9FA6AD);
 
         // ---- 底部栏（坐标/帮助） ----
         drawRect(0, this.height - 30, this.width, this.height, 0xE0101418);
