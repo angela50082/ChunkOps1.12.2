@@ -143,6 +143,15 @@
 **Q：缓存占空间怎么办？**
 地图缓存位于 `<游戏目录>/chunkops/cache/<存档名>/<维度>/`，可直接删除，下次浏览会重新生成。
 
+## 反馈与贡献
+
+- 仓库：<https://github.com/angela50082/ChunkOps1.12.2>
+- 遇到问题请开 [Issue](https://github.com/angela50082/ChunkOps1.12.2/issues)，并附上：
+  1. 你的整合包/模组列表（或整合包名 + 版本）；
+  2. `logs/latest.log` 里的 `[ChunkOps-diag]` 行；
+  3. 出问题时的截图或复现步骤（"复制 → 粘贴 → 进游戏查看"具体哪一步、哪个方块不对）。
+- 欢迎 PR；改代码前建议先读 `docs/设计文档.md` 与 `docs/项目状态与交接简报.md`。
+
 ## 许可证
 
 本项目采用 **MIT License**，详见 [LICENSE](LICENSE)。
