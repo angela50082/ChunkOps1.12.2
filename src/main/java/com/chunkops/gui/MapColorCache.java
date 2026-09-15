@@ -38,13 +38,6 @@ public class MapColorCache {
         return color;
     }
 
-    private static final MapColorCache STATIC = new MapColorCache();
-
-    /** 共享实例的取色（供非 GUI 线程如精确采集器使用）。 */
-    public static int staticColorFor(int stateId) {
-        return STATIC.colorFor(stateId);
-    }
-
     int computeColor(int stateId) {
         try {
             // 关键：stateId = 存档 palette 项（id<<4|meta）。Forge 1.12.2 的 Block.getStateById
@@ -168,15 +161,8 @@ public class MapColorCache {
         return v < min ? min : (v > max ? max : v);
     }
 
-    /** 颜色 × 高度明暗（y 越高越亮）。0.92 起（用户反馈仍暗 → 接近原色，仅轻微高度 shading）。 */
-    public static int shade(int argb, int y) {
-        if (argb == 0) return 0;
-        double f = 0.92 + 0.08 * (y / 255.0);
-        return scale(argb, f);
-    }
-
     /**
-     * 立体感明暗（精确层）：高度亮度 + 坡度阴影（光从西北）。
+     * 立体感明暗（唯一取色着色入口）：高度亮度 + 坡度阴影（光从西北）。
      * 东/南邻域较高 → 该列处于坡地迎光面 → 提亮；反之背光 → 压暗。参数为邻列高度。
      */
     public static int shadeRelief(int argb, int y, int hE, int hW, int hN, int hS) {

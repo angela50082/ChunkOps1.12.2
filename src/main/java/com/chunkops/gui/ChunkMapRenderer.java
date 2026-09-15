@@ -150,13 +150,6 @@ public class ChunkMapRenderer {
         return PENDING;
     }
 
-    /** 调试自检：生成一个全 tile 单色的平色数据（与地图 tile 完全相同的渲染路径）。 */
-    public ChunkMapTile flatTile(int color) {
-        ChunkMapTile t = new ChunkMapTile();
-        java.util.Arrays.fill(t.colors, color);
-        return t;
-    }
-
     public int background() {
         return BACKGROUND;
     }

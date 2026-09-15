@@ -1,8 +1,8 @@
 [
   {
     "modid": "chunkops",
-    "name": "ChunkOps 1.12.2",
-    "description": "MCA Selector 式模组兼容区块编辑器（1.12.2），阶段 0 骨架",
+    "name": "! ChunkOps 区块编辑器",
+    "description": "MCA Selector 式模组兼容区块编辑器（1.12.2）：区块删除/清空/剪裁/统计 + 跨存档名称化复制粘贴；入口=主菜单按钮 或 模组列表→配置",
     "version": "${version}",
     "mcversion": "1.12.2",
     "url": "",
