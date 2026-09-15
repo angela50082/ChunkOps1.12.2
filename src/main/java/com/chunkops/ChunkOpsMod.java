@@ -15,12 +15,18 @@ import java.io.File;
 
 /**
  * ChunkOps112 - 1.12.2 模组兼容区块编辑器（阶段 0 骨架）
+ *
+ * 入口（2026-09-15）：主菜单注入按钮 + 模组列表「配置」（guiFactory）——后者不受主菜单美化模组
+ * （FancyMenu/CustomMainMenu 等会隐藏/清除主菜单按钮）影响，是可靠备用入口。
+ * 显示名以 "! " 开头：Forge 模组列表按 name.toLowerCase() 排序（SortType.NORMAL/A_TO_Z），
+ * 故本模组恒排最前，便于查找。
  */
-@Mod(modid = ChunkOpsMod.MODID, name = ChunkOpsMod.NAME, version = ChunkOpsMod.VERSION)
+@Mod(modid = ChunkOpsMod.MODID, name = ChunkOpsMod.NAME, version = ChunkOpsMod.VERSION,
+        guiFactory = "com.chunkops.gui.ChunkOpsGuiFactory")
 public class ChunkOpsMod {
 
     public static final String MODID = "chunkops";
-    public static final String NAME = "ChunkOps 1.12.2";
+    public static final String NAME = "! ChunkOps 区块编辑器";
     public static final String VERSION = "0.1.0";
 
     private static Logger logger;
