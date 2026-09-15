@@ -82,9 +82,48 @@ public class RegionReader {
     public int getChunkTimestamp(int index) throws IOException {
         RandomAccessFile raf = new RandomAccessFile(file, "r");
         try {
-            if (raf.length() < 4096 + 4096) return 0;
-            raf.seek(4096 + index * 4L);
-            return raf.readInt();
+            return readTimestamp(raf, index);
+        } finally {
+            raf.close();
+        }
+    }
+
+    private static int readTimestamp(RandomAccessFile raf, int index) throws IOException {
+        if (raf.length() < 4096 + 4096) return 0;
+        raf.seek(4096 + index * 4L);
+        return raf.readInt();
+    }
+
+    /**
+     * 一次打开同时读取 chunk 数据与时间戳（性能：避免每 chunk 两次开文件）。
+     * @param tsOut tsOut[0] 写入时间戳（无此区块为 0）
+     * @return chunk 原始数据（同 readChunkData），无则 null
+     */
+    public byte[] readChunkDataWithTimestamp(int index, int[] tsOut) throws IOException {
+        RandomAccessFile raf = new RandomAccessFile(file, "r");
+        try {
+            if (tsOut != null && tsOut.length > 0) tsOut[0] = readTimestamp(raf, index);
+            raf.seek(index * 4L);
+            int loc = raf.readInt();
+            if (loc == 0) return null;
+            int sectorOffset = (loc >>> 8) * SECTOR_BYTES;
+            int sectorCount = loc & 0xFF;
+            if (sectorCount <= 0 || sectorOffset + (long) sectorCount * SECTOR_BYTES > raf.length()) {
+                return null;
+            }
+            raf.seek(sectorOffset);
+            byte[] head = new byte[5];
+            raf.readFully(head);
+            int dataLen = ((head[0] & 0xFF) << 24) | ((head[1] & 0xFF) << 16)
+                    | ((head[2] & 0xFF) << 8) | (head[3] & 0xFF);
+            int total = 4 + dataLen;
+            if (total < 5 || total > sectorCount * SECTOR_BYTES) {
+                return null;
+            }
+            byte[] data = new byte[total];
+            System.arraycopy(head, 0, data, 0, 5);
+            raf.readFully(data, 5, total - 5);
+            return data;
         } finally {
             raf.close();
         }

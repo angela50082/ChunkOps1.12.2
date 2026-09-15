@@ -29,7 +29,20 @@ public class ChunkOpsEditorScreen extends GuiScreen {
     private final List<WorldSummary> worlds = new ArrayList<WorldSummary>();
     private int selectedWorld = -1;
     private File currentWorldDir = null;
+    /** 当前维度目录（含 region/）：主世界=存档根，其他维度=存档/DIMn——地图与所有选区操作都用它。 */
+    private File currentDimDir = null;
+    private int currentDim = 0;
+    private final java.util.List<Integer> dims = new java.util.ArrayList<Integer>();
+    private int selectedDim = 0;
+    private boolean dimMenuOpen = false;
     private final ChunkMapRenderer renderer = new ChunkMapRenderer();
+
+    // 地图色块缓存（视图/尺寸不变且无新 tile 时复用，避免每帧重建数千 quad）
+    private final java.util.List<int[]> mapQuads = new java.util.ArrayList<int[]>();
+    private String mapQuadKey = "";
+    private int mapQuadAge = 0;
+    private int mapLoadedCount = 0;
+    private int frameNo = 0;
 
     // 视图状态（方块坐标）
     private double viewX = 8;
@@ -110,10 +123,64 @@ public class ChunkOpsEditorScreen extends GuiScreen {
         } else {
             currentWorldDir = null;
         }
-        // 切换存档：清除地图缓存与粘贴预览
+        // 切换存档：重建维度列表 + 清除地图缓存与粘贴预览
         pastePreview = false;
         previewTiles = null;
+        rebuildDims();
         renderer.clear(); // 关键：切换存档必须清空地图缓存（含进行中的异步任务），否则跨世界串图/闪烁
+        mapQuadKey = "";
+    }
+
+    /** 扫描存档可用维度：主世界(region/) + DIM&lt;id&gt;/region/（下界 -1、末地 1、模组维度任意 id）。 */
+    private void rebuildDims() {
+        dims.clear();
+        if (currentWorldDir == null) {
+            currentDimDir = null;
+            currentDim = 0;
+            selectedDim = 0;
+            return;
+        }
+        dims.add(Integer.valueOf(0));
+        try {
+            File[] subs = currentWorldDir.listFiles();
+            if (subs != null) {
+                java.util.List<Integer> extra = new java.util.ArrayList<Integer>();
+                for (File f : subs) {
+                    if (!f.isDirectory()) continue;
+                    String n = f.getName();
+                    if (!n.startsWith("DIM")) continue;
+                    if (!new File(f, "region").isDirectory()) continue;
+                    try {
+                        extra.add(Integer.valueOf(Integer.parseInt(n.substring(3))));
+                    } catch (Exception ignored) {
+                        // 非数字目录名：跳过
+                    }
+                }
+                java.util.Collections.sort(extra);
+                dims.addAll(extra);
+            }
+        } catch (Exception ignored) {
+        }
+        setDim(0);
+    }
+
+    /** 切换维度（地图缓存与粘贴预览失效；视图位置保留）。 */
+    private void setDim(int idx) {
+        if (idx < 0 || idx >= dims.size()) return;
+        selectedDim = idx;
+        currentDim = dims.get(idx).intValue();
+        currentDimDir = currentDim == 0 ? currentWorldDir : new File(currentWorldDir, "DIM" + currentDim);
+        pastePreview = false;
+        previewTiles = null;
+        renderer.clear();
+        mapQuadKey = "";
+    }
+
+    private String dimName(int dim) {
+        if (dim == 0) return "主世界";
+        if (dim == -1) return "下界";
+        if (dim == 1) return "末地";
+        return "维度 " + dim;
     }
 
     @Override
@@ -140,6 +207,7 @@ public class ChunkOpsEditorScreen extends GuiScreen {
         this.buttonList.add(new GuiButton(BTN_BACK, this.width - 86, y, 80, 20, "返回主菜单"));
         this.buttonList.add(new GuiButton(BTN_READONLY, this.width - 170, y, 80, 20, "只读: 关"));
         worldMenuOpen = false;
+        dimMenuOpen = false;
     }
 
     @Override
@@ -161,30 +229,44 @@ public class ChunkOpsEditorScreen extends GuiScreen {
         int maxCx = (int) Math.floor((viewX + (double) mapCenterX() / ppb) / 16);
         int minCz = (int) Math.floor((viewZ - (double) (mapBottom - mapTop) / 2 / ppb) / 16);
         int maxCz = (int) Math.floor((viewZ + (double) (mapBottom - mapTop) / 2 / ppb) / 16);
-        int loadedCount = 0;
-        if (currentWorldDir != null) {
-            renderer.pump(); // 每帧一次：收割完成的任务 + 重置提交预算
-            // 顶点色批量渲染（与 drawRect 同路径，100% 正常；绕开 DynamicTexture 在整合包环境的暗化）
-            java.util.List<int[]> visible = new java.util.ArrayList<int[]>(); // [sx, sy, px, py, color]
-            for (int cx = minCx; cx <= maxCx; cx++) {
-                for (int cz = minCz; cz <= maxCz; cz++) {
-                    int sx = mapCenterX() + (int) Math.round((cx * 16 - viewX) * ppb);
-                    int sy = mapCenterY + (int) Math.round((cz * 16 - viewZ) * ppb);
-                    int size = Math.max(1, (int) Math.round(16 * ppb));
-                    ChunkMapRenderer.ChunkMapTile tile = renderer.getOrLoad(currentWorldDir, cx, cz);
-                    if (tile != null) {
-                        collectTileQuads(visible, tile, sx, sy, size);
-                        loadedCount++;
-                    } else {
-                        visible.add(new int[]{sx, sy, size, size, renderer.pendingColor()});
+        int loadedCount = mapLoadedCount;
+        if (currentDimDir != null) {
+            int added = renderer.pump(); // 每帧一次：收割完成的任务 + 重置提交预算
+            // 地图色块缓存：视图/尺寸不变且无新 tile 时复用上一帧结果（避免每帧重建数千 quad）
+            String qk = currentDimDir.getAbsolutePath() + "|" + viewX + "|" + viewZ + "|" + zoom
+                    + "|" + this.width + "|" + this.height;
+            boolean dragging = moving || selecting || dragPreview || zoomDrag;
+            frameNo++;
+            boolean rebuild = !qk.equals(mapQuadKey) || added > 0 || ++mapQuadAge > 30;
+            // 拖动/缩放中隔帧重建（大视野下每帧重建数千 quad 会掉帧；隔帧重建肉眼无感）
+            if (rebuild && dragging && (frameNo & 1) != 0 && !mapQuads.isEmpty()) rebuild = false;
+            if (rebuild) {
+                mapQuadAge = 0;
+                mapQuadKey = qk;
+                mapQuads.clear();
+                loadedCount = 0;
+                for (int cx = minCx; cx <= maxCx; cx++) {
+                    for (int cz = minCz; cz <= maxCz; cz++) {
+                        int sx = mapCenterX() + (int) Math.round((cx * 16 - viewX) * ppb);
+                        int sy = mapCenterY + (int) Math.round((cz * 16 - viewZ) * ppb);
+                        int size = Math.max(1, (int) Math.round(16 * ppb));
+                        ChunkMapRenderer.ChunkMapTile tile = renderer.getOrLoad(currentDimDir, currentDim, cx, cz);
+                        if (tile != null) {
+                            collectTileQuads(mapQuads, tile, sx, sy, size);
+                            loadedCount++;
+                        } else if (!renderer.isAbsent(currentDimDir, cx, cz)) {
+                            // 未就绪：占位色块（已确认不存在的区块不画，省下数千 quad）
+                            mapQuads.add(new int[]{sx, sy, size, size, renderer.pendingColor()});
+                        }
                     }
                 }
+                mapLoadedCount = loadedCount;
             }
-            drawTileQuads(visible);
+            drawTileQuads(mapQuads);
         }
 
         // ---- 粘贴预览（幽灵层 + 白绿轮廓框；预览态框选 = 定位，事件中直接更新 pasteTarget） ----
-        if (pastePreview && currentWorldDir != null) {
+        if (pastePreview && currentDimDir != null) {
             int ppx = mapCenterX() + (int) Math.round((pasteTargetCx * 16 - viewX) * ppb);
             int ppy = mapCenterY + (int) Math.round((pasteTargetCz * 16 - viewZ) * ppb);
             int psz = (int) Math.round(16 * ppb);
@@ -236,7 +318,7 @@ public class ChunkOpsEditorScreen extends GuiScreen {
         drawHorizontalLine(0, this.width - PANEL_W, mapCenterY, 0xFF55616C);
 
         // ---- 选区边框（预览态不产生框选，无冲突） ----
-        if (selMinCx != -1 && currentWorldDir != null) {
+        if (selMinCx != -1 && currentDimDir != null) {
             int sx1 = mapCenterX() + (int) Math.round((selMinCx * 16 - viewX) * ppb);
             int sy1 = mapCenterY + (int) Math.round((selMinCz * 16 - viewZ) * ppb);
             int sx2 = mapCenterX() + (int) Math.round(((selMaxCx + 1) * 16 - viewX) * ppb);
@@ -258,6 +340,8 @@ public class ChunkOpsEditorScreen extends GuiScreen {
         // 存档下拉按钮（替代 "<" ">" 切换）
         int wbx = 6, wby = 4, wbw = 214, wbh = 22;
         boolean wbHover = mouseX >= wbx && mouseX < wbx + wbw && mouseY >= wby && mouseY < wby + wbh;
+        int dbx = wbx + wbw + 6, dbw = 150;
+        boolean dbHover = mouseX >= dbx && mouseX < dbx + dbw && mouseY >= wby && mouseY < wby + wbh;
         drawRect(wbx, wby, wbx + wbw, wby + wbh, worldMenuOpen || wbHover ? 0xFF2A323C : 0xFF20262C);
         drawRect(wbx, wby, wbx + wbw, wby + 1, 0xFF3A444E);
         this.fontRenderer.drawString("存档: " + name, wbx + 8, wby + 7, 0xFFFFFFFF);
@@ -280,7 +364,29 @@ public class ChunkOpsEditorScreen extends GuiScreen {
         }
         this.fontRenderer.drawString(String.format("%d 个存档 | 已加载 %d 区块 | 排队 %d | 未探索 %d",
                 worlds.size(), loadedCount, renderer.queuedCount(), renderer.absentCount()),
-                234, 10, 0xFF9FA6AD);
+                dbx + dbw + 8, 10, 0xFF9FA6AD);
+
+        // ---- 维度下拉（主世界 / 下界 / 末地 / 模组维度） ----
+        drawRect(dbx, wby, dbx + dbw, wby + wbh, dimMenuOpen || dbHover ? 0xFF2A323C : 0xFF20262C);
+        drawRect(dbx, wby, dbx + dbw, wby + 1, 0xFF3A444E);
+        this.fontRenderer.drawString("维度: " + dimName(currentDim), dbx + 8, wby + 7, 0xFFFFFFFF);
+        this.fontRenderer.drawString("▾", dbx + dbw - 14, wby + 7, 0xFFAAAAAA);
+        if (dimMenuOpen) {
+            int rows = Math.min(dims.size(), 12);
+            int my0 = wby + wbh + 2;
+            int mh = rows * 16 + 4;
+            drawRect(dbx, my0, dbx + dbw + 6, my0 + mh, 0xF0181C24);
+            drawRect(dbx, my0, dbx + dbw + 6, my0 + 1, 0xFF3A444E);
+            drawRect(dbx, my0 + mh - 1, dbx + dbw + 6, my0 + mh, 0xFF3A444E);
+            for (int i = 0; i < rows; i++) {
+                int ry = my0 + 2 + i * 16;
+                boolean hov = mouseX >= dbx && mouseX < dbx + dbw + 6 && mouseY >= ry && mouseY < ry + 16;
+                if (hov) drawRect(dbx, ry, dbx + dbw + 6, ry + 16, 0xFF2A323C);
+                String dn = dimName(dims.get(i).intValue()) + " (DIM" + dims.get(i) + ")";
+                this.fontRenderer.drawString((i == selectedDim ? "✔ " : "   ") + dn,
+                        dbx + 6, ry + 4, hov ? 0xFFFFFFFF : 0xFFCCCCCC);
+            }
+        }
 
         // ---- 底部栏（坐标/帮助） ----
         drawRect(0, this.height - 30, this.width, this.height, 0xE0101418);
@@ -348,6 +454,19 @@ public class ChunkOpsEditorScreen extends GuiScreen {
 
     private void collectTileQuads(java.util.List<int[]> out, ChunkMapRenderer.ChunkMapTile tile,
                                   int sx, int sy, int size, int alphaMask) {
+        // 单色 tile 快速路径（海洋/虚空/大片同色）：1 个 quad 替代最多 256 个
+        int first = tile.colors[0];
+        boolean uniform = true;
+        for (int i = 1; i < 256; i++) {
+            if (tile.colors[i] != first) {
+                uniform = false;
+                break;
+            }
+        }
+        if (uniform) {
+            out.add(new int[]{sx, sy, size, size, (first & 0x00FFFFFF) | alphaMask});
+            return;
+        }
         int cols = Math.max(2, Math.min(16, size / 2));
         for (int cz2 = 0; cz2 < cols; cz2++) {
             int ty = Math.min(15, cz2 * 16 / cols);
@@ -665,7 +784,7 @@ public class ChunkOpsEditorScreen extends GuiScreen {
 
     /** 后台统计选区（异步，防大选区卡帧）。 */
     private void runStats() {
-        if (currentWorldDir == null || selMinCx == -1) {
+        if (currentDimDir == null || selMinCx == -1) {
             logLine("请先框选区块，再点「统计」");
             return;
         }
@@ -673,7 +792,7 @@ public class ChunkOpsEditorScreen extends GuiScreen {
         statsBusy = true;
         statsSummary = "统计中…（" + (selMaxCx - selMinCx + 1) + "x"
                 + (selMaxCz - selMinCz + 1) + " 区块）";
-        final File wd = currentWorldDir;
+        final File wd = currentDimDir;
         final int x1 = selMinCx, x2 = selMaxCx, z1 = selMinCz, z2 = selMaxCz;
         Thread t = new Thread(new Runnable() {
             public void run() {
@@ -693,6 +812,7 @@ public class ChunkOpsEditorScreen extends GuiScreen {
         String[] lines = {
                 "左键拖动    框选区块",
                 "中键拖动    移动视图",
+                "顶部下拉    切换存档 / 切换维度(主世界·下界·末地·模组)",
                 "右键/滚轮  菜单 / 缩放",
                 "R           移除选区",
                 "C           清空选区",
@@ -721,9 +841,9 @@ public class ChunkOpsEditorScreen extends GuiScreen {
         }
     }
 
-    /** 执行选区操作（含 session.lock 与只读检查）。 */
+    /** 执行选区操作（含 session.lock 与只读检查）。操作对象 = 当前维度目录。 */
     private void runSelectionOp(String op) {
-        if (currentWorldDir == null) {
+        if (currentDimDir == null) {
             logLine("未选择存档");
             return;
         }
@@ -747,25 +867,25 @@ public class ChunkOpsEditorScreen extends GuiScreen {
         if (op.equals("remove")) {
             for (int cx = selMinCx; cx <= selMaxCx; cx++) {
                 for (int cz = selMinCz; cz <= selMaxCz; cz++) {
-                    logLine(GuiOps.removeChunk(currentWorldDir, cx, cz, false));
+                    logLine(GuiOps.removeChunk(currentDimDir, cx, cz, false));
                 }
             }
             renderer.clear(); // 数据已变：地图缓存失效重载
         } else if (op.equals("clear")) {
             for (int cx = selMinCx; cx <= selMaxCx; cx++) {
                 for (int cz = selMinCz; cz <= selMaxCz; cz++) {
-                    logLine(GuiOps.clearChunk(currentWorldDir, cx, cz, false));
+                    logLine(GuiOps.clearChunk(currentDimDir, cx, cz, false));
                 }
             }
             renderer.clear();
         } else if (op.equals("trim")) {
-            logLine(GuiOps.trimArea(currentWorldDir, selMinCx, selMaxCx, selMinCz, selMaxCz, false));
+            logLine(GuiOps.trimArea(currentDimDir, selMinCx, selMaxCx, selMinCz, selMaxCz, false));
             renderer.clear();
         } else if (op.equals("stats")) {
-            String s = GuiOps.statsArea(currentWorldDir, selMinCx, selMaxCx, selMinCz, selMaxCz);
+            String s = GuiOps.statsArea(currentDimDir, selMinCx, selMaxCx, selMinCz, selMaxCz);
             for (String line : s.split("\n")) logLine(line);
         } else if (op.equals("copy")) {
-            clipboard = GuiOps.copyArea(currentWorldDir, selMinCx, selMaxCx, selMinCz, selMaxCz);
+            clipboard = GuiOps.copyArea(currentDimDir, selMinCx, selMaxCx, selMinCz, selMaxCz);
             clipboardNamed = clipboard != null ? GuiOps.exportClipboardNamed(clipboard) : null;
             clipOriginCx = selMinCx;
             clipOriginCz = selMinCz;
@@ -795,7 +915,7 @@ public class ChunkOpsEditorScreen extends GuiScreen {
             }
             if (pastePreview) {
                 // 确认：名称化导入（按名+meta 反解活注册表，不串块）→ 写入预览目标
-                logLine(GuiOps.pasteAreaNamed(currentWorldDir, clipboardNamed,
+                logLine(GuiOps.pasteAreaNamed(currentDimDir, clipboardNamed,
                         clipOriginCx, clipOriginCz, pasteTargetCx, pasteTargetCz));
                 pastePreview = false;
                 previewTiles = null;
@@ -831,8 +951,22 @@ public class ChunkOpsEditorScreen extends GuiScreen {
             helpOpen = false;
             return;
         }
-        // 存档下拉菜单（按钮/列表项/外部点击关闭）
+        // 存档/维度下拉菜单（按钮/列表项/外部点击关闭）
         int wbx = 6, wby = 4, wbw = 214, wbh = 22;
+        int dbx = wbx + wbw + 6, dbw = 150;
+        if (dimMenuOpen) {
+            boolean inList = mouseX >= dbx && mouseX < dbx + dbw + 6
+                    && mouseY >= wby + wbh + 2 && mouseY < wby + wbh + 2 + Math.min(dims.size(), 12) * 16 + 4;
+            if (inList) {
+                int idx = (mouseY - (wby + wbh + 2)) / 16;
+                if (idx < dims.size()) {
+                    setDim(idx);
+                    logLine("切换到维度: " + dimName(currentDim) + " (DIM" + currentDim + ")");
+                }
+            }
+            dimMenuOpen = false;
+            return;
+        }
         if (worldMenuOpen) {
             boolean inList = mouseX >= wbx && mouseX < wbx + wbw + 6
                     && mouseY >= wby + wbh + 2 && mouseY < wby + wbh + 2 + Math.min(worlds.size(), 12) * 16 + 4;
@@ -849,6 +983,10 @@ public class ChunkOpsEditorScreen extends GuiScreen {
         }
         if (mouseX >= wbx && mouseX < wbx + wbw && mouseY >= wby && mouseY < wby + wbh) {
             worldMenuOpen = true;
+            return;
+        }
+        if (mouseX >= dbx && mouseX < dbx + dbw && mouseY >= wby && mouseY < wby + wbh) {
+            dimMenuOpen = true;
             return;
         }
         if (panelClick(mouseX, mouseY, mouseButton)) return; // 右侧面板优先

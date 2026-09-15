@@ -4,9 +4,6 @@ import com.chunkops.core.RegionWriter;
 import com.chunkops.core.SectionCodec;
 import com.chunkops.verify.NbtNode;
 import com.chunkops.verify.RegionReader;
-import net.minecraft.client.renderer.texture.DynamicTexture;
-import net.minecraft.client.renderer.texture.TextureManager;
-import net.minecraft.util.ResourceLocation;
 
 import java.io.File;
 import java.util.HashMap;
@@ -20,17 +17,15 @@ import java.util.concurrent.ThreadFactory;
 
 /**
  * 2D 区块地图渲染器（阶段 3）：
- * - 文件级读取 region（不经游戏世界加载，大存档流畅）
+ * - 文件级读取 region（不经游戏世界加载，大存档流畅）；**支持任意维度**（dimDir = 含 region/ 的目录）
  * - 地表取列：优先 HeightMap(int[256])，缺失时从 y=255 向下扫描
  * - 取色：MapColor × 生物群系调色 × 高度+坡度明暗（地图模组式）
- * - 持久缓存：MapTileCache 每 chunk bake 最终像素落盘（按 region 头时间戳失效）
- * - 异步：线程池加载 chunk → 主线程 pump 收割 → DynamicTexture 缓存
- * - LRU：tile 缓存与纹理缓存均有上限（自动淘汰最旧）
+ * - 持久缓存：MapTileCache 每 chunk bake 最终像素落盘（按 region 头时间戳失效、按维度分目录）
+ * - 异步：线程池加载 → 主线程每帧 pump 收割；负缓存跳过不存在的区块；每帧提交预算防队列灌爆
  */
 public class ChunkMapRenderer {
 
     private static final int TILE_CACHE_MAX = 16384;   // tile 数据缓存：大存档浏览不驱逐（16MB）
-    private static final int TEXTURE_CACHE_MAX = 2048;  // GL 纹理缓存：驱逐后重建很快，不闪烁
     private static final int BACKGROUND = 0xFF14181C;
     private static final int PENDING = 0xFF20262C;
 
@@ -41,19 +36,12 @@ public class ChunkMapRenderer {
             return size() > TILE_CACHE_MAX;
         }
     };
-    private final Map<String, ResourceLocation> textures = new LinkedHashMap<String, ResourceLocation>(256, 0.75f, true) {
-        protected boolean removeEldestEntry(Map.Entry<String, ResourceLocation> eldest) {
-            return size() > TEXTURE_CACHE_MAX;
-        }
-    };
     private final Map<String, Future<ChunkMapTile>> pending = new HashMap<String, Future<ChunkMapTile>>();
     /** 负缓存：磁盘不存在的 chunk（虚空/未探索），会话内不再反复提交加载任务（2026-09-03 卡顿根因修复）。 */
     private final java.util.Set<String> absent = java.util.concurrent.ConcurrentHashMap.newKeySet();
     /** 每帧新提交任务预算：超限下帧继续（防止放大视野时一次性灌爆线程池队列）。 */
     private static final int SUBMIT_BUDGET = 160;
     private int frameSubmitted = 0;
-    /** 纹理命名递增序号（主线程专用，保证唯一）。 */
-    private int texSeq = 0;
 
     private final ExecutorService pool = Executors.newFixedThreadPool(4, new ThreadFactory() {
         public Thread newThread(Runnable r) {
@@ -68,28 +56,28 @@ public class ChunkMapRenderer {
         public final int[] colors = new int[256];
     }
 
-    static String key(String worldPath, int cx, int cz) {
-        return worldPath + "|" + cx + "," + cz;
+    /** 键：维度目录绝对路径 + chunk 坐标（维度天然隔离，跨维度不串图）。 */
+    static String key(String dimPath, int cx, int cz) {
+        return dimPath + "|" + cx + "," + cz;
     }
 
-    /** 清空全部缓存（切换存档/世界修改时调用；同时清负缓存，允许重试新出现的区块）。 */
+    /** 清空全部缓存（切换存档/维度/世界修改时调用；同时清负缓存，允许重试新出现的区块）。 */
     public void clear() {
         synchronized (pending) {
             for (Future<ChunkMapTile> f : pending.values()) f.cancel(true);
             pending.clear();
         }
         tiles.clear();
-        textures.clear();
         absent.clear();
         frameSubmitted = 0;
     }
 
     /**
-     * 主线程调用：收割已完成的异步加载，返回 tile（未就绪返回 null；无此区块→负缓存跳过，不再提交）。
+     * 主线程调用：返回 tile（未就绪返回 null；磁盘无此区块→负缓存跳过，不再提交）。
      * 调用方每帧应先 pump() 一次。
      */
-    public ChunkMapTile getOrLoad(File worldDir, int cx, int cz) {
-        String k = key(worldDir.getAbsolutePath(), cx, cz);
+    public ChunkMapTile getOrLoad(File dimDir, int dim, int cx, int cz) {
+        String k = key(dimDir.getAbsolutePath(), cx, cz);
         ChunkMapTile tile = tiles.get(k);
         if (tile != null) return tile;
         if (absent.contains(k)) return null; // 负缓存：磁盘无此区块，不再反复提交
@@ -97,12 +85,13 @@ public class ChunkMapRenderer {
             if (!pending.containsKey(k)) {
                 if (frameSubmitted >= SUBMIT_BUDGET) return null; // 本帧预算耗尽：下帧继续
                 frameSubmitted++;
-                final String fWorld = worldDir.getAbsolutePath();
+                final String fDimDir = dimDir.getAbsolutePath();
+                final int fDim = dim;
                 final int fx = cx;
                 final int fz = cz;
                 pending.put(k, pool.submit(new java.util.concurrent.Callable<ChunkMapTile>() {
                     public ChunkMapTile call() {
-                        return loadTile(new File(fWorld), fx, fz);
+                        return loadTile(new File(fDimDir), fDim, fx, fz);
                     }
                 }));
             }
@@ -110,9 +99,13 @@ public class ChunkMapRenderer {
         return null;
     }
 
-    /** 主线程调用（每帧一次）：重置预算并收割完成的任务；失败的 chunk 记入负缓存。 */
-    public void pump() {
+    /**
+     * 主线程调用（每帧一次）：重置预算并收割完成的任务；失败的 chunk 记入负缓存。
+     * @return 本次新就绪的 tile 数（调用方据此决定是否重建地图色块缓存）
+     */
+    public int pump() {
         frameSubmitted = 0;
+        int added = 0;
         synchronized (pending) {
             Iterator<Map.Entry<String, Future<ChunkMapTile>>> it = pending.entrySet().iterator();
             while (it.hasNext()) {
@@ -122,6 +115,7 @@ public class ChunkMapRenderer {
                         ChunkMapTile t = e.getValue().get();
                         if (t != null) {
                             tiles.put(e.getKey(), t);
+                            added++;
                         } else {
                             absent.add(e.getKey()); // 加载失败/无此区块 → 负缓存（本会话不再重试）
                         }
@@ -132,6 +126,12 @@ public class ChunkMapRenderer {
                 }
             }
         }
+        return added;
+    }
+
+    /** 该 chunk 是否已确认磁盘不存在（负缓存命中）。 */
+    public boolean isAbsent(File dimDir, int cx, int cz) {
+        return absent.contains(key(dimDir.getAbsolutePath(), cx, cz));
     }
 
     /** 当前排队/执行中的任务数（主线程读）。 */
@@ -144,25 +144,6 @@ public class ChunkMapRenderer {
     /** 负缓存大小 = 会话内确认不存在的区块数（主线程读）。 */
     public int absentCount() {
         return absent.size();
-    }
-
-    /** 主线程调用：获取/创建 chunk 纹理（DynamicTexture 16×16，nearest 拉伸由 GL 决定）。 */
-    public ResourceLocation textureFor(String key, ChunkMapTile tile, TextureManager tm) {
-        ResourceLocation loc = textures.get(key);
-        if (loc == null) {
-            // 唯一命名（原 hashCode 命名有碰撞风险 → 不同 chunk 复用同一纹理 = "两个一模一样的地方"）
-            loc = new ResourceLocation("chunkops", "map/t" + (++texSeq));
-            DynamicTexture dt = new DynamicTexture(16, 16);
-            int[] data = dt.getTextureData();
-            // 关键：1.12.2 DynamicTexture 像素就是 ARGB（0xAARRGGBB）直填。
-            // （原 "ABGR 转换"经色板自检实证为错误：红↔蓝交换；文件级"正确"是
-            //   sprite 帧 ABGR 提取错(交换1) × 转换(交换2) 双重抵消的假象）
-            System.arraycopy(tile.colors, 0, data, 0, 256);
-            dt.updateDynamicTexture();
-            tm.loadTexture(loc, dt);
-            textures.put(key, loc);
-        }
-        return loc;
     }
 
     public int pendingColor() {
@@ -186,23 +167,45 @@ public class ChunkMapRenderer {
 
     // ------------------------------------------------------------ load
 
+    /** 维度目录 → 世界名（dim 0 时目录名即世界名；DIMn 取父目录名）。 */
+    private static String worldNameOf(File dimDir, int dim) {
+        if (dim == 0) return dimDir.getName();
+        File p = dimDir.getParentFile();
+        return p != null ? p.getName() : dimDir.getName();
+    }
+
+    /**
+     * 维度目录 → 游戏目录（缓存根）。
+     * 注意：dim 0 的 dimDir = saves/&lt;世界&gt;，其他维度 = saves/&lt;世界&gt;/DIMn（多一层），
+     * 必须先还原出世界目录再往上退两级，否则非主世界会错落到 saves/chunkops（2026-09-15 修复）。
+     */
+    private static File gameDirOf(File dimDir, int dim) {
+        File worldDir = (dim == 0) ? dimDir : dimDir.getParentFile();
+        if (worldDir == null) return null;
+        File saves = worldDir.getParentFile();
+        return saves == null ? null : saves.getParentFile();
+    }
+
     /** 后台线程：加载一个 chunk 的 16×16 地表颜色图（持久缓存优先，未命中解码+bake）。 */
-    ChunkMapTile loadTile(File worldDir, int cx, int cz) {
+    ChunkMapTile loadTile(File dimDir, int dim, int cx, int cz) {
         try {
             int rx = Math.floorDiv(cx, 32);
             int rz = Math.floorDiv(cz, 32);
-            File region = new File(new File(worldDir, "region"), "r." + rx + "." + rz + ".mca");
+            File region = new File(new File(dimDir, "region"), "r." + rx + "." + rz + ".mca");
             if (!region.isFile()) return null;
             RegionReader rr = new RegionReader(region);
             int index = (cz & 31) * 32 + (cx & 31);
 
-            // 持久缓存（按 region 头时间戳失效）
-            File gameDir = worldDir.getParentFile() == null ? null : worldDir.getParentFile().getParentFile();
+            // 持久缓存（按 region 头时间戳失效；按 世界/维度 分目录）
+            File gameDir = gameDirOf(dimDir, dim);
+            String worldName = worldNameOf(dimDir, dim);
+            // 一次开文件同时取「时间戳 + 数据」：缓存命中则直接用，未命中则解码
+            int[] tsHold = new int[1];
+            byte[] payload = null;
             if (gameDir != null) {
                 int ts = rr.getChunkTimestamp(index);
                 if (ts != 0) {
-                    File cf = MapTileCache.fileFor(gameDir, worldDir.getName(), cx, cz);
-                    int[] cached = MapTileCache.load(cf, ts);
+                    int[] cached = MapTileCache.load(MapTileCache.fileFor(gameDir, worldName, dim, cx, cz), ts);
                     if (cached != null) {
                         ChunkMapTile t = new ChunkMapTile();
                         System.arraycopy(cached, 0, t.colors, 0, 256);
@@ -211,7 +214,7 @@ public class ChunkMapRenderer {
                 }
             }
 
-            byte[] payload = rr.readChunkData(index);
+            payload = rr.readChunkDataWithTimestamp(index, tsHold);
             if (payload == null) return null;
             NbtNode root = RegionWriter.unpackChunk(payload);
             NbtNode level = root.get("Level");
@@ -237,12 +240,9 @@ public class ChunkMapRenderer {
 
             ChunkMapTile tile = buildTile(secStates, heightMap, biomes);
 
-            // 写回持久缓存
-            if (gameDir != null) {
-                int ts = rr.getChunkTimestamp(index);
-                if (ts != 0) {
-                    MapTileCache.save(MapTileCache.fileFor(gameDir, worldDir.getName(), cx, cz), ts, tile.colors);
-                }
+            // 写回持久缓存（时间戳来自同一次读取）
+            if (gameDir != null && tsHold[0] != 0) {
+                MapTileCache.save(MapTileCache.fileFor(gameDir, worldName, dim, cx, cz), tsHold[0], tile.colors);
             }
             return tile;
         } catch (Exception e) {

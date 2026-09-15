@@ -24,9 +24,9 @@ final class MapTileCache {
     private MapTileCache() {
     }
 
-    static File fileFor(File gameDir, String worldName, int cx, int cz) {
-        return new File(new File(new File(gameDir, "chunkops/cache"), worldName),
-                "c." + cx + "." + cz + ".cache");
+    static File fileFor(File gameDir, String worldName, int dim, int cx, int cz) {
+        return new File(new File(new File(new File(gameDir, "chunkops/cache"), worldName),
+                String.valueOf(dim)), "c." + cx + "." + cz + ".cache");
     }
 
     /** 命中且时间戳一致返回 256 ARGB 色块，否则 null。 */
