@@ -6,8 +6,18 @@
 ![Minecraft](https://img.shields.io/badge/Minecraft-1.12.2-62B47A)
 ![Forge](https://img.shields.io/badge/Forge-14.23.5.x-orange)
 ![License](https://img.shields.io/badge/License-MIT-blue)
+[![Build](https://github.com/angela50082/ChunkOps1.12.2/actions/workflows/build.yml/badge.svg)](https://github.com/angela50082/ChunkOps1.12.2/actions/workflows/build.yml)
+[![Release](https://img.shields.io/github/v/release/angela50082/ChunkOps1.12.2?label=release)](https://github.com/angela50082/ChunkOps1.12.2/releases)
 
 ---
+
+## 下载
+
+**➡️ 到 [Releases 页面](https://github.com/angela50082/ChunkOps1.12.2/releases) 下载最新版 `chunkops-x.y.z-mc1.12.2.jar`，丢进 `mods/` 目录即可。**
+
+- 每次发布都由 GitHub Actions 自动构建（见 [Release 工作流](https://github.com/angela50082/ChunkOps1.12.2/actions/workflows/release.yml)），jar 就是源码构建产物；
+- 想要未发布的开发版：到 [Actions](https://github.com/angela50082/ChunkOps1.12.2/actions/workflows/build.yml) 点进最近一次成功的运行，在最下方 **Artifacts → chunkops-jar** 下载；
+- 想自己从源码构建：见文末「开发者信息」。
 
 ## 这是什么
 
@@ -203,7 +213,10 @@
 
 ```
 ChunkOps112/
-├── src/main/java/com/chunkops/   # Forge 模组源码（GUI / 渲染 / 缓存）
+├── src/main/java/com/chunkops/   # Forge 模组源码（GUI / 渲染 / 缓存 / 数据层）
+├── src/main/resources/           # 语言文件 assets/chunkops/lang/ + mcmod.info
+├── .github/workflows/            # CI：build.yml（构建）/ release.yml（发版）
+├── gradle/ + gradlew(.bat)       # Gradle 4.9 wrapper（CI 与本机都用它）
 ├── tools/verifier/               # 纯 Java 数据层与验证工具（零依赖，可脱离 Forge 运行）
 ├── docs/设计文档.md              # 设计方案
 ├── docs/项目状态与交接简报.md     # 当前状态 / 交接
@@ -212,15 +225,42 @@ ChunkOps112/
 
 ### 构建
 
+仓库自带 **Gradle 4.9 wrapper**（ForgeGradle 2.3 只能配 Gradle 4.x + JDK 8），所以不用自己装 Gradle：
+
 ```bash
-# 需要 JDK 8 与 Gradle 4.9（ForgeGradle 2.3 的限制）
-export JAVA_HOME=<jdk8 目录>
-export GRADLE_USER_HOME=<repo>/.gradle-home
-gradle build            # 产物：build/libs/chunkops-0.1.0.jar
+export JAVA_HOME=<jdk8 目录>          # 1.12.2 必须 JDK 8
+./gradlew build                       # Windows：gradlew.bat build
+# 产物：build/libs/chunkops-<版本>.jar
 ```
 
 - Forge 必须用 **1.12.2-14.23.5.2847**（唯一带 userdev 的 1.12.2 构建；2854/2860 会导致 ForgeGradle extractUserdev 404）；
-- 开发客户端：`gradle runClient`（需要图形环境）。
+- 开发客户端：`./gradlew runClient`（需要图形环境）；
+- 首次构建要从 `maven.minecraftforge.net` 下载 MC/Forge/MCP（几百 MB）；国内网络慢可把 `build.gradle` 里的 maven 换成注释中的 BMCLAPI 镜像。
+
+### 发布新版本（CI 全自动）
+
+`.github/workflows/` 下有两个工作流，**不需要配置任何密钥**（用 Actions 自带的 `GITHUB_TOKEN`）：
+
+| 工作流 | 触发 | 作用 |
+|---|---|---|
+| `build.yml` | push 到 `main`、PR、手动运行 | 用 JDK 8 + Gradle 4.9 构建，把 jar 作为 Artifact 上传（可下载） |
+| `release.yml` | 推送 `v*` 标签、手动运行 | 构建 → 创建 GitHub Release → 上传 `chunkops-x.y.z-mc1.12.2.jar` |
+
+发版步骤：
+
+```bash
+# 1) 改两处版本号，保持一致
+#    build.gradle:                    version = '0.2.0'
+#    ChunkOpsMod.java:  public static final String VERSION = "0.2.0";
+git add -A && git commit -m "发布 0.2.0"
+
+# 2) 打标签并推送（标签名 = v + 版本号，工作流会校验不一致就报错）
+git tag v0.2.0
+git push origin main
+git push origin v0.2.0
+
+# 3) 去 Actions 页面看进度；完成后 Releases 页面即出现新版本和 jar 附件
+```
 
 ### 验证工具（纯 Java，可离线跑）
 

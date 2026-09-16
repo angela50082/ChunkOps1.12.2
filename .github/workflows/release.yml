@@ -1,0 +1,94 @@
+name: Release
+
+# 发布方式（推荐）：
+#   1) 把 build.gradle 的 version 与 ChunkOpsMod.VERSION 改成新版本号（如 0.2.0）并提交
+#   2) 打标签并推送：git tag v0.2.0 && git push origin v0.2.0
+#   3) 本工作流自动构建 jar → 创建 GitHub Release → 把 jar 作为附件上传
+# 也可在 Actions 页面手动运行（workflow_dispatch）并填要发布的标签
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: '要发布的标签（如 v0.2.0；不存在时会自动创建）'
+        required: true
+
+# 创建 Release 需要写权限（GITHUB_TOKEN 由 Actions 自动提供，无需自己配密钥）
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: 构建并发布 Release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 检出源码
+        uses: actions/checkout@v4
+
+      - name: 安装 JDK 8
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '8'
+
+      - name: 缓存 Gradle 与 ForgeGradle 缓存
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('build.gradle', 'gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: |
+            gradle-${{ runner.os }}-
+
+      # 防止「标签写 0.2.0、jar 里却是 0.1.0」这种低级错误
+      - name: 校验版本一致性
+        id: ver
+        run: |
+          TAG="${{ github.event.inputs.tag_name || github.ref_name }}"
+          VER="${TAG#v}"
+          GV=$(grep -oP "^version = '\K[^']+" build.gradle | head -1)
+          JV=$(grep -oP 'VERSION = "\K[^"]+' src/main/java/com/chunkops/ChunkOpsMod.java | head -1)
+          echo "标签=$TAG  build.gradle=$GV  ChunkOpsMod.VERSION=$JV"
+          if [ "$VER" != "$GV" ] || [ "$VER" != "$JV" ]; then
+            echo "::error::版本不一致：请先把 build.gradle 与 ChunkOpsMod.VERSION 改成 $VER，提交后再打标签"
+            exit 1
+          fi
+          echo "ver=$VER" >> "$GITHUB_OUTPUT"
+
+      - name: 构建（失败自动重试 3 次）
+        run: |
+          chmod +x gradlew
+          ok=0
+          for i in 1 2 3; do
+            if ./gradlew build --no-daemon --stacktrace; then ok=1; break; fi
+            echo "第 $i 次构建失败，15 秒后重试…"
+            sleep 15
+          done
+          [ "$ok" = "1" ] || { echo "构建连续失败，放弃"; exit 1; }
+
+      - name: 整理发布产物（文件名带 MC 版本，便于玩家辨认）
+        run: |
+          mkdir -p dist
+          cp build/libs/chunkops-*.jar "dist/chunkops-${{ steps.ver.outputs.ver }}-mc1.12.2.jar"
+          ls -l dist
+
+      - name: 创建 Release 并上传 jar
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.tag_name || github.ref_name }}
+          name: ChunkOps ${{ steps.ver.outputs.ver }}（Minecraft 1.12.2）
+          files: dist/*.jar
+          generate_release_notes: true
+          body: |
+            ## 下载安装
+            下载下面的 `chunkops-${{ steps.ver.outputs.ver }}-mc1.12.2.jar`，放进整合包/游戏的 `mods/` 目录即可。
+            这是**客户端模组**（单人存档用），服务端不需要装。
+
+            ## 使用前请务必知道
+            - **先备份存档**：本模组会直接读写存档的 `region/*.mca` 文件；
+            - **编辑前后不要改动 `mods` 目录**（增删/替换任何 jar 都可能导致模组方块编号重排，旧数据会被错误解释）；
+            - 详细限制与注意事项见仓库 [README](https://github.com/angela50082/ChunkOps1.12.2#readme) 的「重要限制」一节。

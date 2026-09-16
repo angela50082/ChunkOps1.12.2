@@ -1,0 +1,62 @@
+name: Build
+
+# 触发时机：
+#  - push 到 main：每次提交都构建一次，确认没编译坏
+#  - pull_request：PR 也构建
+#  - workflow_dispatch：在 Actions 页面手动点「Run workflow」
+# 注：推送 v* 标签不会触发本工作流（见 release.yml），避免重复构建
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: 构建模组 jar（JDK 8 + Gradle 4.9）
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 检出源码
+        uses: actions/checkout@v4
+
+      # ForgeGradle 2.3 只支持 JDK 8；用 temurin 8 即可（Linux 上没装也不影响）
+      - name: 安装 JDK 8
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '8'
+
+      # 首次构建要从 maven.minecraftforge.net 下载 MC/Forge/MCP（数百 MB），
+      # 缓存后二次构建只需几十秒；缓存 key 变了（改了 build.gradle）会重新下载
+      - name: 缓存 Gradle 与 ForgeGradle 缓存
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('build.gradle', 'gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: |
+            gradle-${{ runner.os }}-
+
+      # 1.12.2 的依赖源（libraries.minecraft.net / MCP）偶发握手失败，失败重试即可
+      - name: 构建（失败自动重试 3 次）
+        run: |
+          chmod +x gradlew
+          ok=0
+          for i in 1 2 3; do
+            if ./gradlew build --no-daemon --stacktrace; then ok=1; break; fi
+            echo "第 $i 次构建失败，15 秒后重试…"
+            sleep 15
+          done
+          [ "$ok" = "1" ] || { echo "构建连续失败，放弃"; exit 1; }
+
+      - name: 上传 jar（在本次运行页面底部可下载）
+        uses: actions/upload-artifact@v4
+        with:
+          name: chunkops-jar
+          path: build/libs/*.jar
+          if-no-files-found: error

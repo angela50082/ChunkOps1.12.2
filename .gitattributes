@@ -1,0 +1,16 @@
+# 统一换行符：仓库里一律 LF（Linux CI 与 Windows 都能正常构建/执行）
+* text=auto eol=lf
+
+# Windows 批处理必须 CRLF
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Gradle wrapper 在 Linux 上要可执行（配合 git update-index --chmod=+x gradlew）
+gradlew text eol=lf
+
+# 二进制文件不做换行符转换
+*.jar   binary
+*.png   binary
+*.jpg   binary
+*.zip   binary
+*.mcabackup binary
