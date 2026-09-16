@@ -73,7 +73,7 @@ jobs:
       - name: 整理发布产物（文件名带 MC 版本，便于玩家辨认）
         run: |
           mkdir -p dist
-          cp build/libs/chunkops-*.jar "dist/chunkops-${{ steps.ver.outputs.ver }}-mc1.12.2.jar"
+          cp "build/libs/chunkops-${{ steps.ver.outputs.ver }}.jar" "dist/chunkops-${{ steps.ver.outputs.ver }}-mc1.12.2.jar"
           ls -l dist
 
       - name: 创建 Release 并上传 jar

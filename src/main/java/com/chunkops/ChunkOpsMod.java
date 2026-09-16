@@ -25,7 +25,7 @@ public class ChunkOpsMod {
 
     public static final String MODID = "chunkops";
     public static final String NAME = "! ChunkOps";
-    public static final String VERSION = "0.1.0";
+    public static final String VERSION = "0.1.1";
 
     private static Logger logger;
 
