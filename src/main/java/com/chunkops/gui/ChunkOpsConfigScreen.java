@@ -3,7 +3,6 @@ package com.chunkops.gui;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiButton;
 import net.minecraft.client.gui.GuiScreen;
-import net.minecraft.client.resources.I18n;
 
 /**
  * ChunkOps 入口页（模组列表 → ChunkOps → 配置）。
@@ -26,9 +25,9 @@ public class ChunkOpsConfigScreen extends GuiScreen {
         this.buttonList.clear();
         int cx = this.width / 2;
         this.buttonList.add(new GuiButton(BTN_OPEN, cx - 100, this.height / 2 - 24, 200, 20,
-                I18n.format("chunkops.button.openEditor")));
+                ChunkOpsLang.t("chunkops.button.openEditor")));
         this.buttonList.add(new GuiButton(BTN_DONE, cx - 100, this.height / 2 + 22, 200, 20,
-                I18n.format("chunkops.button.done")));
+                ChunkOpsLang.t("chunkops.button.done")));
     }
 
     @Override
@@ -53,12 +52,12 @@ public class ChunkOpsConfigScreen extends GuiScreen {
     public void drawScreen(int mouseX, int mouseY, float partialTicks) {
         this.drawDefaultBackground();
         int cx = this.width / 2;
-        this.drawCenteredString(this.fontRenderer, I18n.format("chunkops.config.title"),
+        this.drawCenteredString(this.fontRenderer, ChunkOpsLang.t("chunkops.config.title"),
                 cx, this.height / 2 - 72, 0xFFFFFF);
         this.drawCenteredString(this.fontRenderer,
-                I18n.format("chunkops.config.hint1"), cx, this.height / 2 - 54, 0xFFAAAAAA);
+                ChunkOpsLang.t("chunkops.config.hint1"), cx, this.height / 2 - 54, 0xFFAAAAAA);
         this.drawCenteredString(this.fontRenderer,
-                I18n.format("chunkops.config.hint2"), cx, this.height / 2 - 42, 0xFFAAAAAA);
+                ChunkOpsLang.t("chunkops.config.hint2"), cx, this.height / 2 - 42, 0xFFAAAAAA);
         super.drawScreen(mouseX, mouseY, partialTicks);
     }
 }

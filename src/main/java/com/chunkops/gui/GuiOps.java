@@ -6,7 +6,6 @@ import com.chunkops.verify.ChunkOpsTool;
 import com.chunkops.verify.NbtNode;
 import com.chunkops.verify.RegionReader;
 import net.minecraft.block.Block;
-import net.minecraft.client.resources.I18n;
 import net.minecraft.util.ResourceLocation;
 import net.minecraft.world.biome.Biome;
 
@@ -32,20 +31,20 @@ public class GuiOps {
     public static String removeChunk(File worldDir, int cx, int cz, boolean dryRun) {
         try {
             ChunkOpsTool.opRemove(worldDir, cx, cz, dryRun);
-            return I18n.format("chunkops.op.removed", cx, cz)
-                    + (dryRun ? I18n.format("chunkops.op.dryRun") : "");
+            return ChunkOpsLang.t("chunkops.op.removed", cx, cz)
+                    + (dryRun ? ChunkOpsLang.t("chunkops.op.dryRun") : "");
         } catch (Exception e) {
-            return I18n.format("chunkops.op.removeFailed", String.valueOf(e.getMessage()));
+            return ChunkOpsLang.t("chunkops.op.removeFailed", String.valueOf(e.getMessage()));
         }
     }
 
     public static String clearChunk(File worldDir, int cx, int cz, boolean dryRun) {
         try {
             ChunkOpsTool.opClear(worldDir, cx, cz, dryRun);
-            return I18n.format("chunkops.op.cleared", cx, cz)
-                    + (dryRun ? I18n.format("chunkops.op.dryRun") : "");
+            return ChunkOpsLang.t("chunkops.op.cleared", cx, cz)
+                    + (dryRun ? ChunkOpsLang.t("chunkops.op.dryRun") : "");
         } catch (Exception e) {
-            return I18n.format("chunkops.op.clearFailed", String.valueOf(e.getMessage()));
+            return ChunkOpsLang.t("chunkops.op.clearFailed", String.valueOf(e.getMessage()));
         }
     }
 
@@ -53,10 +52,10 @@ public class GuiOps {
     public static String trimArea(File worldDir, int minCx, int maxCx, int minCz, int maxCz, boolean dryRun) {
         try {
             ChunkOpsTool.opTrim(worldDir, minCx * 16, minCz * 16, maxCx * 16 + 15, maxCz * 16 + 15, dryRun);
-            return I18n.format("chunkops.op.trimmed", minCx, maxCx, minCz, maxCz)
-                    + (dryRun ? I18n.format("chunkops.op.dryRun") : "");
+            return ChunkOpsLang.t("chunkops.op.trimmed", minCx, maxCx, minCz, maxCz)
+                    + (dryRun ? ChunkOpsLang.t("chunkops.op.dryRun") : "");
         } catch (Exception e) {
-            return I18n.format("chunkops.op.trimFailed", String.valueOf(e.getMessage()));
+            return ChunkOpsLang.t("chunkops.op.trimFailed", String.valueOf(e.getMessage()));
         }
     }
 
@@ -97,7 +96,7 @@ public class GuiOps {
      */
     public static String pasteArea(File worldDir, java.util.Map<Long, byte[]> clipboard,
                                    int originCx, int originCz, int targetCx, int targetCz) {
-        if (clipboard == null || clipboard.isEmpty()) return I18n.format("chunkops.op.clipboardEmpty");
+        if (clipboard == null || clipboard.isEmpty()) return ChunkOpsLang.t("chunkops.op.clipboardEmpty");
         int n = 0;
         int errors = 0;
         // 目标存在则记录（日志用）
@@ -114,7 +113,7 @@ public class GuiOps {
                 int rz = Math.floorDiv(cz, 32);
                 File region = new File(new File(worldDir, "region"), "r." + rx + "." + rz + ".mca");
                 File parent = region.getParentFile();
-                if (!parent.isDirectory() && !parent.mkdirs()) return I18n.format("chunkops.op.noRegionDir");
+                if (!parent.isDirectory() && !parent.mkdirs()) return ChunkOpsLang.t("chunkops.op.noRegionDir");
                 com.chunkops.core.RegionWriter rw = new com.chunkops.core.RegionWriter(region);
                 rw.setChunk((cz & 31) * 32 + (cx & 31), e.getValue());
                 rw.write();
@@ -122,13 +121,13 @@ public class GuiOps {
             } catch (Exception ex) {
                 errors++;
                 if (errors <= 3) {
-                    logLastError = I18n.format("chunkops.op.pasteChunkFailed", cx, cz,
+                    logLastError = ChunkOpsLang.t("chunkops.op.pasteChunkFailed", cx, cz,
                             String.valueOf(ex.getMessage()));
                 }
             }
         }
-        if (errors > 0) return I18n.format("chunkops.op.pasteDoneErrors", n, errors, logLastError);
-        return I18n.format("chunkops.op.pasteDone", n, targetCx, targetCz);
+        if (errors > 0) return ChunkOpsLang.t("chunkops.op.pasteDoneErrors", n, errors, logLastError);
+        return ChunkOpsLang.t("chunkops.op.pasteDone", n, targetCx, targetCz);
     }
 
     private static String logLastError = "";
@@ -236,7 +235,7 @@ public class GuiOps {
      */
     public static String pasteAreaNamed(File worldDir, byte[] mcops,
                                         int originCx, int originCz, int targetCx, int targetCz) {
-        if (mcops == null || mcops.length == 0) return I18n.format("chunkops.op.clipboardEmpty");
+        if (mcops == null || mcops.length == 0) return ChunkOpsLang.t("chunkops.op.clipboardEmpty");
         try {
             boolean jeid = isJeidWorld(worldDir);
             com.chunkops.core.Mcops.ImportReport report = new com.chunkops.core.Mcops.ImportReport();
@@ -308,7 +307,7 @@ public class GuiOps {
                     if (rwObj == null) {
                         File region = new File(new File(worldDir, "region"), "r." + rx + "." + rz + ".mca");
                         File parent = region.getParentFile();
-                        if (!parent.isDirectory() && !parent.mkdirs()) return I18n.format("chunkops.op.noRegionDir");
+                        if (!parent.isDirectory() && !parent.mkdirs()) return ChunkOpsLang.t("chunkops.op.noRegionDir");
                         rwObj = new Object[]{new com.chunkops.core.RegionWriter(region), region, rk};
                         regionWriters.put(rk, rwObj);
                     }
@@ -345,10 +344,10 @@ public class GuiOps {
                 }
             }
             if (verifyFail > 0) {
-                return I18n.format("chunkops.op.pasteVerifyFail", n, targetCx, targetCz, verifyFail);
+                return ChunkOpsLang.t("chunkops.op.pasteVerifyFail", n, targetCx, targetCz, verifyFail);
             }
             StringBuilder sb = new StringBuilder();
-            sb.append(I18n.format("chunkops.op.pasteDoneRegion", n, targetCx, targetCz,
+            sb.append(ChunkOpsLang.t("chunkops.op.pasteDoneRegion", n, targetCx, targetCz,
                     regionWriters.size()));
             if (report.blocksFallenBack > 0) {
                 StringBuilder missing = new StringBuilder();
@@ -357,13 +356,13 @@ public class GuiOps {
                     if (cnt++ >= 5) { missing.append("…"); break; }
                     missing.append(e.getKey()).append("x").append(e.getValue()).append(" ");
                 }
-                sb.append(I18n.format("chunkops.op.pasteFallback", report.blocksFallenBack,
+                sb.append(ChunkOpsLang.t("chunkops.op.pasteFallback", report.blocksFallenBack,
                         report.missingPalette.size(), missing.toString()));
             }
-            if (errors > 0) sb.append(I18n.format("chunkops.op.pasteErrors", errors, lastErr));
+            if (errors > 0) sb.append(ChunkOpsLang.t("chunkops.op.pasteErrors", errors, lastErr));
             return sb.toString();
         } catch (Exception e) {
-            return I18n.format("chunkops.op.pasteFailed", String.valueOf(e.getMessage()));
+            return ChunkOpsLang.t("chunkops.op.pasteFailed", String.valueOf(e.getMessage()));
         }
     }
 
@@ -487,16 +486,16 @@ public class GuiOps {
             long unknownTotal = 0;
             for (long v : unknownIds.values()) unknownTotal += v;
             List<String> lines = new ArrayList<String>();
-            lines.add(I18n.format("chunkops.stats.text", chunks, total));
+            lines.add(ChunkOpsLang.t("chunkops.stats.text", chunks, total));
             for (int i = 0; i < Math.min(12, sorted.size()); i++) {
                 Map.Entry<String, Long> e = sorted.get(i);
-                lines.add("  " + I18n.format("chunkops.stats.modLine", e.getKey(), e.getValue(),
+                lines.add("  " + ChunkOpsLang.t("chunkops.stats.modLine", e.getKey(), e.getValue(),
                         100.0 * e.getValue() / Math.max(1, total)));
             }
-            lines.add("  " + I18n.format("chunkops.stats.unknown", unknownTotal, unknownIds.size()));
+            lines.add("  " + ChunkOpsLang.t("chunkops.stats.unknown", unknownTotal, unknownIds.size()));
             return String.join("\n", lines);
         } catch (Exception e) {
-            return I18n.format("chunkops.stats.failedDetail", String.valueOf(e.getMessage()));
+            return ChunkOpsLang.t("chunkops.stats.failedDetail", String.valueOf(e.getMessage()));
         }
     }
 }
