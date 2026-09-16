@@ -34,6 +34,7 @@
 | 🔒 **只读模式** | 一键切换，防止误写存档 |
 | 💾 **自动备份** | 每次写入前自动生成 `.mcabackup` 备份 |
 | ⚡ **持久地图缓存** | 浏览过的区域缓存到 `chunkops/cache/`，二次浏览 / 重启后秒开（按区块时间戳自动失效） |
+| 🌐 **多语言界面** | 跟随游戏语言：内置**简体中文**与 **English**（`assets/chunkops/lang/`），其它语言回退到英文 |
 
 ## 和类似工具的区别
 
@@ -63,7 +64,7 @@
 ## 怎么打开编辑器（两个入口）
 
 1. **主菜单 →「区块编辑器」按钮**；
-2. **主菜单 →「模组」→ 列表最上方的 `! ChunkOps 区块编辑器` →「配置」→「打开区块编辑器」**
+2. **主菜单 →「模组」→ 列表最上方的 `! ChunkOps` →「配置」→「打开区块编辑器」**
    —— 这条路**始终可用**：主菜单被 FancyMenu / CustomMainMenu 之类的美化模组改造时，第 1 个入口的按钮可能被隐藏，请用这个。
 
 ## 快速上手
@@ -160,6 +161,10 @@
 **Q：缓存占空间怎么办？**
 地图缓存位于 `<游戏目录>/chunkops/cache/<存档名>/<维度>/`，可直接删除，下次浏览会重新生成。
 
+**Q：界面能换成英文吗？**
+界面文字跟随**游戏语言设置**（`选项 → 语言`）：选简体中文显示中文，选 English 显示英文，其余语言回退英文。
+模组列表里的显示名 `! ChunkOps` 是固定的（1.12.2 的模组名不支持语言文件），开头那个 `!` 是为了让它排在列表最前面便于查找。
+
 ## 反馈与贡献
 
 - 仓库：<https://github.com/angela50082/ChunkOps1.12.2>
@@ -241,5 +246,7 @@ whenever the **`mods/` folder changes**. Keep your mod list identical between ed
 existing regions may be re-interpreted (wrong variants / air). Always back up your world first.
 
 Client-side, single-player, Minecraft 1.12.2 only. License: **MIT**.
+
+The UI is localized (`en_us` / `zh_cn`) and follows your game language setting; the mod-list name is fixed as `! ChunkOps`.
 
 </details>

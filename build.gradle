@@ -51,6 +51,9 @@ dependencies {
 }
 
 processResources {
+    // 必须显式指定 UTF-8：expand 过滤器默认用平台编码（中文 Windows=GBK），
+    // 会把 mcmod.info 里的中文读坏（实测 jar 内 description 中文变乱码/丢字节）。
+    filteringCharset = 'UTF-8'
     inputs.property 'version', project.version
     from(sourceSets.main.resources.srcDirs) {
         include 'mcmod.info'

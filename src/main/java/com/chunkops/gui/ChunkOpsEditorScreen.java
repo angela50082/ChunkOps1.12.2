@@ -6,6 +6,7 @@ import net.minecraft.client.gui.GuiScreen;
 import net.minecraft.client.renderer.BufferBuilder;
 import net.minecraft.client.renderer.Tessellator;
 import net.minecraft.client.renderer.vertex.DefaultVertexFormats;
+import net.minecraft.client.resources.I18n;
 import net.minecraft.util.ResourceLocation;
 import net.minecraft.world.storage.WorldSummary;
 import net.minecraftforge.fml.common.Loader;
@@ -82,7 +83,8 @@ public class ChunkOpsEditorScreen extends GuiScreen {
 
     // 统计面板
     private java.util.List<String[]> statsEntries = new java.util.ArrayList<String[]>(); // {name,count,pct}
-    private String statsSummary = "统计：先框选，再点「统计」";
+    /** 统计摘要；null=尚未统计（显示 stats.hint 提示）。惰性取文案：字段初始化时语言资源尚未加载。 */
+    private String statsSummary = null;
     private int statsSortCol = 1;      // 0=名称 1=数量
     private boolean statsDesc = true;
     private int statsScroll = 0;       // 行偏移
@@ -177,10 +179,15 @@ public class ChunkOpsEditorScreen extends GuiScreen {
     }
 
     private String dimName(int dim) {
-        if (dim == 0) return "主世界";
-        if (dim == -1) return "下界";
-        if (dim == 1) return "末地";
-        return "维度 " + dim;
+        if (dim == 0) return I18n.format("chunkops.dim.overworld");
+        if (dim == -1) return I18n.format("chunkops.dim.nether");
+        if (dim == 1) return I18n.format("chunkops.dim.end");
+        return I18n.format("chunkops.dim.other", dim);
+    }
+
+    /** 只读按钮/标签文案（随语言与开关状态变化，故惰性取）。 */
+    private String readOnlyLabel() {
+        return I18n.format(readOnly ? "chunkops.button.readonly.on" : "chunkops.button.readonly.off");
     }
 
     @Override
@@ -204,8 +211,10 @@ public class ChunkOpsEditorScreen extends GuiScreen {
 
         this.buttonList.clear();
         int y = 6;
-        this.buttonList.add(new GuiButton(BTN_BACK, this.width - 86, y, 80, 20, "返回主菜单"));
-        this.buttonList.add(new GuiButton(BTN_READONLY, this.width - 170, y, 80, 20, "只读: 关"));
+        this.buttonList.add(new GuiButton(BTN_BACK, this.width - 86, y, 80, 20,
+                I18n.format("chunkops.button.back")));
+        this.buttonList.add(new GuiButton(BTN_READONLY, this.width - 170, y, 80, 20,
+                readOnlyLabel()));
         worldMenuOpen = false;
         dimMenuOpen = false;
     }
@@ -291,7 +300,7 @@ public class ChunkOpsEditorScreen extends GuiScreen {
             drawRect(ppx, ppy + pH - 1, ppx + pW, ppy + pH, c1);
             drawRect(ppx, ppy, ppx + 1, ppy + pH, c2);
             drawRect(ppx + pW - 1, ppy, ppx + pW, ppy + pH, c2);
-            this.fontRenderer.drawString(String.format("粘贴预览 %dx%d → (%d,%d) | 左键拖动定位 · Ctrl+V 确认 · Esc 取消",
+            this.fontRenderer.drawString(I18n.format("chunkops.paste.previewLabel",
                     previewW, previewH, pasteTargetCx, pasteTargetCz),
                     mapCenterX() - 120, 34, 0xFFAAFFAA);
         }
@@ -336,7 +345,7 @@ public class ChunkOpsEditorScreen extends GuiScreen {
         drawRect(0, 0, this.width, 28, 0xE0101418);
         drawRect(0, 27, this.width, 28, 0xFF3A444E);
         String name = selectedWorld >= 0 && selectedWorld < worlds.size()
-                ? worlds.get(selectedWorld).getDisplayName() : "（无存档）";
+                ? worlds.get(selectedWorld).getDisplayName() : I18n.format("chunkops.ui.noWorld");
         // 存档下拉按钮（替代 "<" ">" 切换）
         int wbx = 6, wby = 4, wbw = 214, wbh = 22;
         boolean wbHover = mouseX >= wbx && mouseX < wbx + wbw && mouseY >= wby && mouseY < wby + wbh;
@@ -344,7 +353,7 @@ public class ChunkOpsEditorScreen extends GuiScreen {
         boolean dbHover = mouseX >= dbx && mouseX < dbx + dbw && mouseY >= wby && mouseY < wby + wbh;
         drawRect(wbx, wby, wbx + wbw, wby + wbh, worldMenuOpen || wbHover ? 0xFF2A323C : 0xFF20262C);
         drawRect(wbx, wby, wbx + wbw, wby + 1, 0xFF3A444E);
-        this.fontRenderer.drawString("存档: " + name, wbx + 8, wby + 7, 0xFFFFFFFF);
+        this.fontRenderer.drawString(I18n.format("chunkops.ui.world", name), wbx + 8, wby + 7, 0xFFFFFFFF);
         this.fontRenderer.drawString("▾", wbx + wbw - 16, wby + 7, 0xFFAAAAAA);
         if (worldMenuOpen) {
             int rows = Math.min(worlds.size(), 12);
@@ -362,14 +371,15 @@ public class ChunkOpsEditorScreen extends GuiScreen {
                         wbx + 6, ry + 4, hov ? 0xFFFFFFFF : 0xFFCCCCCC);
             }
         }
-        this.fontRenderer.drawString(String.format("%d 个存档 | 已加载 %d 区块 | 排队 %d | 未探索 %d",
+        this.fontRenderer.drawString(I18n.format("chunkops.ui.status",
                 worlds.size(), loadedCount, renderer.queuedCount(), renderer.absentCount()),
                 dbx + dbw + 8, 10, 0xFF9FA6AD);
 
         // ---- 维度下拉（主世界 / 下界 / 末地 / 模组维度） ----
         drawRect(dbx, wby, dbx + dbw, wby + wbh, dimMenuOpen || dbHover ? 0xFF2A323C : 0xFF20262C);
         drawRect(dbx, wby, dbx + dbw, wby + 1, 0xFF3A444E);
-        this.fontRenderer.drawString("维度: " + dimName(currentDim), dbx + 8, wby + 7, 0xFFFFFFFF);
+        this.fontRenderer.drawString(I18n.format("chunkops.ui.dim", dimName(currentDim)),
+                dbx + 8, wby + 7, 0xFFFFFFFF);
         this.fontRenderer.drawString("▾", dbx + dbw - 14, wby + 7, 0xFFAAAAAA);
         if (dimMenuOpen) {
             int rows = Math.min(dims.size(), 12);
@@ -392,7 +402,7 @@ public class ChunkOpsEditorScreen extends GuiScreen {
         drawRect(0, this.height - 30, this.width, this.height, 0xE0101418);
         drawRect(0, this.height - 30, this.width, this.height - 29, 0xFF3A444E);
         // 状态栏（左下角：中心 + 鼠标指向区块）
-        String centerStr = String.format("中心: %.0f, %.0f  缩放: %.1f px/方块", viewX, viewZ, ppb);
+        String centerStr = I18n.format("chunkops.ui.center", viewX, viewZ, ppb);
         this.fontRenderer.drawString(centerStr, 6, this.height - 24, 0xAAAAAA);
         int cw = this.fontRenderer.getStringWidth(centerStr);
         String ptrStr = "";
@@ -401,12 +411,12 @@ public class ChunkOpsEditorScreen extends GuiScreen {
             int pcz = (int) Math.floor(screenToBlockZ(mouseY) / 16);
             int pbx = (int) Math.floor(screenToBlockX(mouseX));
             int pbz = (int) Math.floor(screenToBlockZ(mouseY));
-            ptrStr = String.format(" | 指向: 区块 (%d, %d) 方块 (%d, %d)", pcx, pcz, pbx, pbz);
+            ptrStr = I18n.format("chunkops.ui.pointer", pcx, pcz, pbx, pbz);
         } else {
-            ptrStr = " | 指向: ---";
+            ptrStr = I18n.format("chunkops.ui.pointerNone");
         }
         this.fontRenderer.drawString(ptrStr, 6 + cw, this.height - 24, 0xFF88CCFF);
-        this.fontRenderer.drawString("左键框选 · 中键拖动 · 右键取消框选 · 滚轮缩放 · 快捷键 ? · ESC 返回",
+        this.fontRenderer.drawString(I18n.format("chunkops.ui.hint"),
                 mapCenterX() - 140, this.height - 12, 0xFF6F767C);
 
         // ---- 右侧工具面板（自绘控件：按钮/滑块/统计列表/过滤框） ----
@@ -416,14 +426,13 @@ public class ChunkOpsEditorScreen extends GuiScreen {
             statsResult = null;
             statsBusy = false;
             if (r == null) {
-                statsSummary = "统计失败";
+                statsSummary = I18n.format("chunkops.stats.failed");
             } else {
                 @SuppressWarnings("unchecked") java.util.List<String[]> list =
                         (java.util.List<String[]>) r[4];
                 statsEntries = list;
                 statsScroll = 0;
-                statsSummary = String.format("统计: %s 区块 / %s 方块（%d 种）",
-                        r[0], r[1], list.size());
+                statsSummary = I18n.format("chunkops.stats.summary", r[0], r[1], list.size());
             }
         }
         drawRightPanel(mouseX, mouseY);
@@ -548,8 +557,22 @@ public class ChunkOpsEditorScreen extends GuiScreen {
 
     // ------------------------------------------------------------ 右侧工具面板
 
-    private static final String[] TOOL_LABELS = {"移除选区", "清空选区", "剪裁", "统计",
-            "复制", "粘贴", "只读", "帮助"};
+    private static final int TOOL_COUNT = 8;
+
+    /** 工具按钮文案（惰性取：静态初始化时语言资源尚未加载，绝不能做成 static final 数组）。 */
+    private static String toolLabel(int i) {
+        switch (i) {
+            case 0: return I18n.format("chunkops.tool.remove");
+            case 1: return I18n.format("chunkops.tool.clear");
+            case 2: return I18n.format("chunkops.tool.trim");
+            case 3: return I18n.format("chunkops.tool.stats");
+            case 4: return I18n.format("chunkops.tool.copy");
+            case 5: return I18n.format("chunkops.tool.paste");
+            case 6: return I18n.format("chunkops.tool.readonly");
+            default: return I18n.format("chunkops.tool.help");
+        }
+    }
+
     private static final int BTN_W = 87, BTN_H = 22, BTN_GAP = 5;
 
     private int panelX() {
@@ -590,15 +613,15 @@ public class ChunkOpsEditorScreen extends GuiScreen {
         drawRect(px, py0, px + 1, py1, 0xFF3A444E);
         drawRect(px + 1, py0, this.width, py0 + 1, 0xFF3A444E);
         drawRect(px + 1, py1 - 1, this.width, py1, 0xFF2A323C);
-        this.fontRenderer.drawString("工具", px + 12, 40, 0xFFFFFFFF);
+        this.fontRenderer.drawString(I18n.format("chunkops.panel.tools"), px + 12, 40, 0xFFFFFFFF);
         this.fontRenderer.drawString("?", px + PANEL_W - 22, 40, helpOpen ? 0xFFAAFFAA : 0xFF888888);
         drawRect(px + 10, 54, px + PANEL_W - 10, 55, 0xFF232A32);
 
         // 只读按钮显示状态
-        String lo = "只读: " + (readOnly ? "开" : "关");
-        for (int i = 0; i < TOOL_LABELS.length; i++) {
+        String lo = readOnlyLabel();
+        for (int i = 0; i < TOOL_COUNT; i++) {
             int[] r = toolRect(i);
-            String label = i == 6 ? lo : TOOL_LABELS[i];
+            String label = i == 6 ? lo : toolLabel(i);
             boolean hover = mx >= r[0] && mx < r[0] + r[2] && my >= r[1] && my < r[1] + r[3];
             int bg = hover ? 0xFF2A323C : (i == 6 && readOnly ? 0xFF3A4A2A : 0xFF20262C);
             drawRect(r[0], r[1], r[0] + r[2], r[1] + r[3], bg);
@@ -610,7 +633,7 @@ public class ChunkOpsEditorScreen extends GuiScreen {
         // ---- 缩放滑块（对数 0.5..32） ----
         int sy = sliderY();
         drawRect(px + 10, sy - 14, px + PANEL_W - 10, sy - 13, 0xFF232A32);
-        this.fontRenderer.drawString("缩放", px + 12, sy, 0xFFAAAAAA);
+        this.fontRenderer.drawString(I18n.format("chunkops.panel.zoom"), px + 12, sy, 0xFFAAAAAA);
         zoomSliderX = px + 44;
         zoomSliderY = sy + 5;
         zoomSliderW = PANEL_W - 84;
@@ -626,9 +649,9 @@ public class ChunkOpsEditorScreen extends GuiScreen {
         // ---- 统计区 ----
         int sty = statsY();
         drawRect(px + 10, sty - 14, px + PANEL_W - 10, sty - 13, 0xFF232A32);
-        this.fontRenderer.drawString("统计", px + 12, sty, 0xFFAAAAAA);
+        this.fontRenderer.drawString(I18n.format("chunkops.tool.stats"), px + 12, sty, 0xFFAAAAAA);
         drawRect(listX(), sty + 12, listX() + listW(), sty + 28, 0xFF20262C);
-        this.fontRenderer.drawString("过滤:", listX() + 2, sty + 15, 0xFF888888);
+        this.fontRenderer.drawString(I18n.format("chunkops.panel.filter"), listX() + 2, sty + 15, 0xFF888888);
         if (statsBox == null) {
             statsBox = new net.minecraft.client.gui.GuiTextField(200, this.fontRenderer,
                     listX() + 30, sty + 12, listW() - 32, 16);
@@ -638,8 +661,10 @@ public class ChunkOpsEditorScreen extends GuiScreen {
         // 表头（点击排序）
         int hy = sty + 34;
         drawRect(listX(), hy, listX() + listW(), hy + 11, 0xFF2A323C);
-        String nameH = "名称" + (statsSortCol == 0 ? (statsDesc ? " ▼" : " ▲") : "");
-        String cntH = "数量" + (statsSortCol == 1 ? (statsDesc ? " ▼" : " ▲") : "");
+        String nameH = I18n.format("chunkops.panel.colName")
+                + (statsSortCol == 0 ? (statsDesc ? " ▼" : " ▲") : "");
+        String cntH = I18n.format("chunkops.panel.colCount")
+                + (statsSortCol == 1 ? (statsDesc ? " ▼" : " ▲") : "");
         this.fontRenderer.drawString(nameH, listX() + 3, hy + 2, 0xFFAAAAAA);
         this.fontRenderer.drawString(cntH, listX() + listW() - 40, hy + 2, 0xFFAAAAAA);
 
@@ -683,7 +708,8 @@ public class ChunkOpsEditorScreen extends GuiScreen {
                 drawRect(listX() + listW() + 2, barY, listX() + listW() + 5, barY + barH, 0xFF888888);
             }
         }
-        this.fontRenderer.drawString(statsSummary, px + 10, py1 - 12, 0xFF888888);
+        this.fontRenderer.drawString(statsSummary != null ? statsSummary
+                : I18n.format("chunkops.stats.hint"), px + 10, py1 - 12, 0xFF888888);
 
         // 帮助浮层
         if (helpOpen) drawHelpOverlay();
@@ -718,7 +744,7 @@ public class ChunkOpsEditorScreen extends GuiScreen {
             return true;
         }
         if (button == 0) {
-            for (int i = 0; i < TOOL_LABELS.length; i++) {
+            for (int i = 0; i < TOOL_COUNT; i++) {
                 int[] r = toolRect(i);
                 if (mx >= r[0] && mx < r[0] + r[2] && my >= r[1] && my < r[1] + r[3]) {
                     switch (i) {
@@ -728,7 +754,9 @@ public class ChunkOpsEditorScreen extends GuiScreen {
                         case 3: runStats(); break;
                         case 4: runSelectionOp("copy"); break;
                         case 5: runSelectionOp("paste"); break;
-                        case 6: readOnly = !readOnly; logLine("只读: " + (readOnly ? "开" : "关")); break;
+                        case 6: readOnly = !readOnly;
+                            logLine(I18n.format(readOnly ? "chunkops.log.readonlyOn" : "chunkops.log.readonlyOff"));
+                            break;
                         case 7: helpOpen = true; break;
                     }
                     return true;
@@ -785,13 +813,13 @@ public class ChunkOpsEditorScreen extends GuiScreen {
     /** 后台统计选区（异步，防大选区卡帧）。 */
     private void runStats() {
         if (currentDimDir == null || selMinCx == -1) {
-            logLine("请先框选区块，再点「统计」");
+            logLine(I18n.format("chunkops.stats.selectFirst"));
             return;
         }
         if (statsBusy) return;
         statsBusy = true;
-        statsSummary = "统计中…（" + (selMaxCx - selMinCx + 1) + "x"
-                + (selMaxCz - selMinCz + 1) + " 区块）";
+        statsSummary = I18n.format("chunkops.stats.running", selMaxCx - selMinCx + 1,
+                selMaxCz - selMinCz + 1);
         final File wd = currentDimDir;
         final int x1 = selMinCx, x2 = selMaxCx, z1 = selMinCz, z2 = selMaxCz;
         Thread t = new Thread(new Runnable() {
@@ -808,26 +836,26 @@ public class ChunkOpsEditorScreen extends GuiScreen {
         int x = mapCenterX() - 210, y = 60, w = 420, h = 300;
         drawRect(x, y, x + w, y + h, 0xF0000000);
         drawRect(x, y, x + w, y + 1, 0xFF3A444E);
-        this.fontRenderer.drawString("快捷键 / 操作", x + 16, y + 10, 0xFFFFFFFF);
+        this.fontRenderer.drawString(I18n.format("chunkops.help.title"), x + 16, y + 10, 0xFFFFFFFF);
         String[] lines = {
-                "左键拖动    框选区块",
-                "中键拖动    移动视图",
-                "顶部下拉    切换存档 / 切换维度(主世界·下界·末地·模组)",
-                "右键/滚轮  菜单 / 缩放",
-                "R           移除选区",
-                "C           清空选区",
-                "T           剪裁(保留选区)",
-                "S           统计选区",
-                "Ctrl+C/V    复制 / 预览粘贴(左键拖动定位+再按确认)",
-                "Ctrl+滚轮   缩放地图",
-                "ESC         返回主菜单",
+                I18n.format("chunkops.help.l1"),
+                I18n.format("chunkops.help.l2"),
+                I18n.format("chunkops.help.l3"),
+                I18n.format("chunkops.help.l4"),
+                I18n.format("chunkops.help.l5"),
+                I18n.format("chunkops.help.l6"),
+                I18n.format("chunkops.help.l7"),
+                I18n.format("chunkops.help.l8"),
+                I18n.format("chunkops.help.l9"),
+                I18n.format("chunkops.help.l10"),
+                I18n.format("chunkops.help.l11"),
         };
         int ly = y + 30;
         for (String s : lines) {
             this.fontRenderer.drawString(s, x + 20, ly, 0xFFCCCCCC);
             ly += 15;
         }
-        this.fontRenderer.drawString("点击任意处关闭", x + 16, y + h - 20, 0xFF888888);
+        this.fontRenderer.drawString(I18n.format("chunkops.help.close"), x + 16, y + h - 20, 0xFF888888);
     }
 
     @Override
@@ -836,33 +864,33 @@ public class ChunkOpsEditorScreen extends GuiScreen {
             ChunkOpsGuiHandler.backToMainMenu();
         } else if (button.id == BTN_READONLY) {
             readOnly = !readOnly;
-            button.displayString = readOnly ? "只读: 开" : "只读: 关";
-            logLine(readOnly ? "已开启只读模式（不写入存档）" : "已关闭只读模式");
+            button.displayString = readOnlyLabel();
+            logLine(I18n.format(readOnly ? "chunkops.log.readonlyOn" : "chunkops.log.readonlyOff"));
         }
     }
 
     /** 执行选区操作（含 session.lock 与只读检查）。操作对象 = 当前维度目录。 */
     private void runSelectionOp(String op) {
         if (currentDimDir == null) {
-            logLine("未选择存档");
+            logLine(I18n.format("chunkops.log.noWorld"));
             return;
         }
         boolean writeOp = !op.equals("stats") && !op.equals("copy");
         if (readOnly && writeOp) {
-            logLine("[只读] 操作未执行");
+            logLine(I18n.format("chunkops.log.readonlyBlocked"));
             return;
         }
         if (writeOp && GuiOps.hasSessionLock(currentWorldDir)) {
-            logLine("[警告] 检测到 session.lock——该存档可能被游戏实例占用，继续操作可能损坏！");
+            logLine(I18n.format("chunkops.log.sessionLock"));
         }
         if (selMinCx == -1 && !op.equals("paste")) {
-            logLine("请先框选区块（左键拖动）");
+            logLine(I18n.format("chunkops.log.selectFirst"));
             return;
         }
         if (!op.equals("paste")) {
             int w = selMaxCx - selMinCx + 1;
             int h = selMaxCz - selMinCz + 1;
-            logLine("选区 [" + selMinCx + ".." + selMaxCx + ", " + selMinCz + ".." + selMaxCz + "] " + w + "x" + h + " 区块");
+            logLine(I18n.format("chunkops.log.selection", selMinCx, selMaxCx, selMinCz, selMaxCz, w, h));
         }
         if (op.equals("remove")) {
             for (int cx = selMinCx; cx <= selMaxCx; cx++) {
@@ -889,28 +917,30 @@ public class ChunkOpsEditorScreen extends GuiScreen {
             clipboardNamed = clipboard != null ? GuiOps.exportClipboardNamed(clipboard) : null;
             clipOriginCx = selMinCx;
             clipOriginCz = selMinCz;
-            logLine(clipboard != null ? "已复制 " + clipboard.size() + " 个区块到剪贴板（名称化，源 "
-                    + clipOriginCx + "," + clipOriginCz + "）" : "复制失败");
+            logLine(clipboard != null
+                    ? I18n.format("chunkops.log.copied", clipboard.size(), clipOriginCx, clipOriginCz)
+                    : I18n.format("chunkops.log.copyFailed"));
             int unknownN = com.chunkops.core.Mcops.lastExportUnknown.get();
             if (unknownN > 0) {
-                logLine("[警告] 源区 " + unknownN + " 种方块编号会话不认识");
+                logLine(I18n.format("chunkops.log.unknownWarn", unknownN));
                 java.util.List<Long> keys = new java.util.ArrayList<Long>(
                         com.chunkops.core.Mcops.lastExportUnknownChunks);
                 java.util.Collections.sort(keys);
                 int shown = Math.min(keys.size(), 4);
-                StringBuilder sb = new StringBuilder("含未知编号区块: ");
+                StringBuilder sb = new StringBuilder();
                 for (int i = 0; i < shown; i++) {
                     long k = keys.get(i);
-                    sb.append("(" + (int) (k >> 32) + "," + (int) (k & 0xFFFFFFFFL) + ") ");
+                    sb.append("(").append((int) (k >> 32)).append(",")
+                            .append((int) (k & 0xFFFFFFFFL)).append(") ");
                 }
-                if (keys.size() > shown) sb.append("等" + keys.size() + "个");
-                logLine(sb.toString());
-                logLine("Quark/林业类方块每次启动编号都变");
-                logLine("建议: 新世界搭建→保存退出(勿关游戏)→再复制");
+                if (keys.size() > shown) sb.append(I18n.format("chunkops.log.andMore", keys.size()));
+                logLine(I18n.format("chunkops.log.unknownChunks", sb.toString()));
+                logLine(I18n.format("chunkops.log.unknownWhy"));
+                logLine(I18n.format("chunkops.log.unknownAdvice"));
             }
         } else if (op.equals("paste")) {
             if (clipboard == null || clipboard.isEmpty() || clipboardNamed == null) {
-                logLine("剪贴板为空（先复制选区）");
+                logLine(I18n.format("chunkops.log.clipboardEmpty"));
                 return;
             }
             if (pastePreview) {
@@ -939,7 +969,7 @@ public class ChunkOpsEditorScreen extends GuiScreen {
                 previewW = Math.max(1, maxCx - minCx + 1);
                 previewH = Math.max(1, maxCz - minCz + 1);
                 startPreviewLoad();
-                logLine("粘贴预览：" + previewW + "x" + previewH + " 区块，左键拖动预览定位，再按 Ctrl+V 确认，Esc 取消");
+                logLine(I18n.format("chunkops.log.pastePreview", previewW, previewH));
             }
         }
     }
@@ -961,7 +991,8 @@ public class ChunkOpsEditorScreen extends GuiScreen {
                 int idx = (mouseY - (wby + wbh + 2)) / 16;
                 if (idx < dims.size()) {
                     setDim(idx);
-                    logLine("切换到维度: " + dimName(currentDim) + " (DIM" + currentDim + ")");
+                    logLine(I18n.format("chunkops.log.switchDim", dimName(currentDim),
+                            String.valueOf(currentDim)));
                 }
             }
             dimMenuOpen = false;
@@ -975,7 +1006,7 @@ public class ChunkOpsEditorScreen extends GuiScreen {
                 if (idx < worlds.size()) {
                     selectedWorld = idx;
                     updateWorldDir();
-                    logLine("切换到存档: " + worlds.get(idx).getDisplayName());
+                    logLine(I18n.format("chunkops.log.switchWorld", worlds.get(idx).getDisplayName()));
                 }
             }
             worldMenuOpen = false;
@@ -1007,7 +1038,7 @@ public class ChunkOpsEditorScreen extends GuiScreen {
         } else if (mouseButton == 1) { // 右键：取消框选
             if (selMinCx != -1 || selMaxCx != -1) {
                 selMinCx = selMaxCx = selMinCz = selMaxCz = -1;
-                logLine("已取消框选");
+                logLine(I18n.format("chunkops.log.selectionCleared"));
             }
         }
     }
@@ -1090,7 +1121,7 @@ public class ChunkOpsEditorScreen extends GuiScreen {
             if (pastePreview) { // 预览态：ESC 取消预览（不退出）
                 pastePreview = false;
                 previewTiles = null;
-                logLine("已取消粘贴");
+                logLine(I18n.format("chunkops.log.pasteCancelled"));
                 return;
             }
             ChunkOpsGuiHandler.backToMainMenu();

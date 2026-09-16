@@ -4,6 +4,7 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiButton;
 import net.minecraft.client.gui.GuiMainMenu;
 import net.minecraft.client.gui.GuiScreen;
+import net.minecraft.client.resources.I18n;
 import net.minecraftforge.client.event.GuiScreenEvent;
 import net.minecraftforge.fml.common.Mod;
 import net.minecraftforge.fml.common.eventhandler.SubscribeEvent;
@@ -33,7 +34,7 @@ public class ChunkOpsGuiHandler {
             }
             if (maxBottom > 0) y = Math.max(y, maxBottom + 6);
             event.getButtonList().add(new GuiButton(BUTTON_ID,
-                    width / 2 - 100, y, 200, 20, "区块编辑器"));
+                    width / 2 - 100, y, 200, 20, I18n.format("chunkops.button.editor")));
         }
     }
 

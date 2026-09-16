@@ -6,6 +6,7 @@ import com.chunkops.verify.ChunkOpsTool;
 import com.chunkops.verify.NbtNode;
 import com.chunkops.verify.RegionReader;
 import net.minecraft.block.Block;
+import net.minecraft.client.resources.I18n;
 import net.minecraft.util.ResourceLocation;
 import net.minecraft.world.biome.Biome;
 
@@ -31,18 +32,20 @@ public class GuiOps {
     public static String removeChunk(File worldDir, int cx, int cz, boolean dryRun) {
         try {
             ChunkOpsTool.opRemove(worldDir, cx, cz, dryRun);
-            return "移除区块 (" + cx + "," + cz + ")" + (dryRun ? " [干跑]" : "");
+            return I18n.format("chunkops.op.removed", cx, cz)
+                    + (dryRun ? I18n.format("chunkops.op.dryRun") : "");
         } catch (Exception e) {
-            return "移除失败: " + e.getMessage();
+            return I18n.format("chunkops.op.removeFailed", String.valueOf(e.getMessage()));
         }
     }
 
     public static String clearChunk(File worldDir, int cx, int cz, boolean dryRun) {
         try {
             ChunkOpsTool.opClear(worldDir, cx, cz, dryRun);
-            return "清空区块 (" + cx + "," + cz + ")" + (dryRun ? " [干跑]" : "");
+            return I18n.format("chunkops.op.cleared", cx, cz)
+                    + (dryRun ? I18n.format("chunkops.op.dryRun") : "");
         } catch (Exception e) {
-            return "清空失败: " + e.getMessage();
+            return I18n.format("chunkops.op.clearFailed", String.valueOf(e.getMessage()));
         }
     }
 
@@ -50,9 +53,10 @@ public class GuiOps {
     public static String trimArea(File worldDir, int minCx, int maxCx, int minCz, int maxCz, boolean dryRun) {
         try {
             ChunkOpsTool.opTrim(worldDir, minCx * 16, minCz * 16, maxCx * 16 + 15, maxCz * 16 + 15, dryRun);
-            return "剪裁完成（保留 [" + minCx + ".." + maxCx + ", " + minCz + ".." + maxCz + "]）" + (dryRun ? " [干跑]" : "");
+            return I18n.format("chunkops.op.trimmed", minCx, maxCx, minCz, maxCz)
+                    + (dryRun ? I18n.format("chunkops.op.dryRun") : "");
         } catch (Exception e) {
-            return "剪裁失败: " + e.getMessage();
+            return I18n.format("chunkops.op.trimFailed", String.valueOf(e.getMessage()));
         }
     }
 
@@ -93,7 +97,7 @@ public class GuiOps {
      */
     public static String pasteArea(File worldDir, java.util.Map<Long, byte[]> clipboard,
                                    int originCx, int originCz, int targetCx, int targetCz) {
-        if (clipboard == null || clipboard.isEmpty()) return "剪贴板为空";
+        if (clipboard == null || clipboard.isEmpty()) return I18n.format("chunkops.op.clipboardEmpty");
         int n = 0;
         int errors = 0;
         // 目标存在则记录（日志用）
@@ -110,7 +114,7 @@ public class GuiOps {
                 int rz = Math.floorDiv(cz, 32);
                 File region = new File(new File(worldDir, "region"), "r." + rx + "." + rz + ".mca");
                 File parent = region.getParentFile();
-                if (!parent.isDirectory() && !parent.mkdirs()) return "目标缺少 region 目录";
+                if (!parent.isDirectory() && !parent.mkdirs()) return I18n.format("chunkops.op.noRegionDir");
                 com.chunkops.core.RegionWriter rw = new com.chunkops.core.RegionWriter(region);
                 rw.setChunk((cz & 31) * 32 + (cx & 31), e.getValue());
                 rw.write();
@@ -118,12 +122,13 @@ public class GuiOps {
             } catch (Exception ex) {
                 errors++;
                 if (errors <= 3) {
-                    logLastError = "粘贴失败 (" + cx + "," + cz + "): " + ex.getMessage();
+                    logLastError = I18n.format("chunkops.op.pasteChunkFailed", cx, cz,
+                            String.valueOf(ex.getMessage()));
                 }
             }
         }
-        if (errors > 0) return "粘贴完成: " + n + " 个区块（含 " + errors + " 个失败: " + logLastError + "）";
-        return "粘贴完成: " + n + " 个区块 → 目标 (" + targetCx + "," + targetCz + ")";
+        if (errors > 0) return I18n.format("chunkops.op.pasteDoneErrors", n, errors, logLastError);
+        return I18n.format("chunkops.op.pasteDone", n, targetCx, targetCz);
     }
 
     private static String logLastError = "";
@@ -231,7 +236,7 @@ public class GuiOps {
      */
     public static String pasteAreaNamed(File worldDir, byte[] mcops,
                                         int originCx, int originCz, int targetCx, int targetCz) {
-        if (mcops == null || mcops.length == 0) return "剪贴板为空";
+        if (mcops == null || mcops.length == 0) return I18n.format("chunkops.op.clipboardEmpty");
         try {
             boolean jeid = isJeidWorld(worldDir);
             com.chunkops.core.Mcops.ImportReport report = new com.chunkops.core.Mcops.ImportReport();
@@ -303,7 +308,7 @@ public class GuiOps {
                     if (rwObj == null) {
                         File region = new File(new File(worldDir, "region"), "r." + rx + "." + rz + ".mca");
                         File parent = region.getParentFile();
-                        if (!parent.isDirectory() && !parent.mkdirs()) return "目标缺少 region 目录";
+                        if (!parent.isDirectory() && !parent.mkdirs()) return I18n.format("chunkops.op.noRegionDir");
                         rwObj = new Object[]{new com.chunkops.core.RegionWriter(region), region, rk};
                         regionWriters.put(rk, rwObj);
                     }
@@ -340,26 +345,25 @@ public class GuiOps {
                 }
             }
             if (verifyFail > 0) {
-                return "粘贴完成: " + n + " 个区块 → 目标 (" + targetCx + "," + targetCz
-                        + ")，但回读校验失败 " + verifyFail + " 个（数据异常，请勿进游戏并反馈日志）";
+                return I18n.format("chunkops.op.pasteVerifyFail", n, targetCx, targetCz, verifyFail);
             }
             StringBuilder sb = new StringBuilder();
-            sb.append("粘贴完成: ").append(n).append(" 个区块 → 目标 (").append(targetCx)
-                    .append(",").append(targetCz).append(")，region ").append(regionWriters.size()).append(" 个");
+            sb.append(I18n.format("chunkops.op.pasteDoneRegion", n, targetCx, targetCz,
+                    regionWriters.size()));
             if (report.blocksFallenBack > 0) {
-                sb.append("；缺失方块回退 ").append(report.blocksFallenBack)
-                        .append(" 个（").append(report.missingPalette.size()).append(" 种: ");
+                StringBuilder missing = new StringBuilder();
                 int cnt = 0;
                 for (java.util.Map.Entry<String, Long> e : report.missingPalette.entrySet()) {
-                    if (cnt++ >= 5) { sb.append("…"); break; }
-                    sb.append(e.getKey()).append("x").append(e.getValue()).append(" ");
+                    if (cnt++ >= 5) { missing.append("…"); break; }
+                    missing.append(e.getKey()).append("x").append(e.getValue()).append(" ");
                 }
-                sb.append("）");
+                sb.append(I18n.format("chunkops.op.pasteFallback", report.blocksFallenBack,
+                        report.missingPalette.size(), missing.toString()));
             }
-            if (errors > 0) sb.append("；含 ").append(errors).append(" 个失败: ").append(lastErr);
+            if (errors > 0) sb.append(I18n.format("chunkops.op.pasteErrors", errors, lastErr));
             return sb.toString();
         } catch (Exception e) {
-            return "粘贴失败: " + e.getMessage();
+            return I18n.format("chunkops.op.pasteFailed", String.valueOf(e.getMessage()));
         }
     }
 
@@ -482,17 +486,17 @@ public class GuiOps {
             });
             long unknownTotal = 0;
             for (long v : unknownIds.values()) unknownTotal += v;
-            StringBuilder sb = new StringBuilder();
-            sb.append("统计: ").append(chunks).append(" 区块 / ").append(total).append(" 方块");
+            List<String> lines = new ArrayList<String>();
+            lines.add(I18n.format("chunkops.stats.text", chunks, total));
             for (int i = 0; i < Math.min(12, sorted.size()); i++) {
                 Map.Entry<String, Long> e = sorted.get(i);
-                sb.append("\n  ").append(e.getKey()).append(": ").append(e.getValue())
-                        .append(String.format(" (%.2f%%)", 100.0 * e.getValue() / Math.max(1, total)));
+                lines.add("  " + I18n.format("chunkops.stats.modLine", e.getKey(), e.getValue(),
+                        100.0 * e.getValue() / Math.max(1, total)));
             }
-            sb.append("\n  未知 id: ").append(unknownTotal).append(" 方块 / ").append(unknownIds.size()).append(" 种");
-            return sb.toString();
+            lines.add("  " + I18n.format("chunkops.stats.unknown", unknownTotal, unknownIds.size()));
+            return String.join("\n", lines);
         } catch (Exception e) {
-            return "统计失败: " + e.getMessage();
+            return I18n.format("chunkops.stats.failedDetail", String.valueOf(e.getMessage()));
         }
     }
 }

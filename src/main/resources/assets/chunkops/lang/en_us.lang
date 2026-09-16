@@ -1,0 +1,116 @@
+# ChunkOps - English (en_us)
+# Keys: chunkops.<area>.<name>; %s/%d/%.2f are runtime arguments (do not remove)
+
+# ---- Top / bottom status bars ----
+chunkops.ui.world=World: %s
+chunkops.ui.noWorld=(no world)
+chunkops.ui.status=%d worlds | %d chunks loaded | %d queued | %d unexplored
+chunkops.ui.dim=Dimension: %s
+chunkops.ui.center=Center: %.0f, %.0f  Zoom: %.1f px/block
+chunkops.ui.pointer= | At: chunk (%d, %d) block (%d, %d)
+chunkops.ui.pointerNone= | At: ---
+chunkops.ui.hint=LMB drag: select · MMB drag: pan · RMB: clear selection · wheel: zoom · ?: shortcuts · ESC: back
+
+# ---- Dimension names ----
+chunkops.dim.overworld=Overworld
+chunkops.dim.nether=Nether
+chunkops.dim.end=The End
+chunkops.dim.other=Dimension %d
+
+# ---- Buttons ----
+chunkops.button.back=Back to main menu
+chunkops.button.readonly.off=Read-only: OFF
+chunkops.button.readonly.on=Read-only: ON
+chunkops.button.editor=Chunk Editor
+chunkops.button.openEditor=Open chunk editor
+chunkops.button.done=Done
+
+# ---- Right tool panel ----
+chunkops.tool.remove=Remove sel.
+chunkops.tool.clear=Clear sel.
+chunkops.tool.trim=Trim
+chunkops.tool.stats=Stats
+chunkops.tool.copy=Copy
+chunkops.tool.paste=Paste
+chunkops.tool.readonly=Read-only
+chunkops.tool.help=Help
+chunkops.panel.tools=Tools
+chunkops.panel.zoom=Zoom
+chunkops.panel.filter=Filter:
+chunkops.panel.colName=Name
+chunkops.panel.colCount=Count
+
+# ---- Stats panel ----
+chunkops.stats.hint=Stats: select chunks first, then press "Stats"
+chunkops.stats.failed=Stats failed
+chunkops.stats.failedDetail=Stats failed: %s
+chunkops.stats.summary=Stats: %s chunks / %s blocks (%d types)
+chunkops.stats.selectFirst=Select chunks first, then press "Stats"
+chunkops.stats.running=Scanning… (%dx%d chunks)
+chunkops.stats.text=Stats: %d chunks / %d blocks
+chunkops.stats.modLine=%s: %s (%.2f%%)
+chunkops.stats.unknown=Unknown ids: %d blocks / %d types
+
+# ---- Help overlay ----
+chunkops.help.title=Controls
+chunkops.help.l1=LMB drag    Select chunks
+chunkops.help.l2=MMB drag    Pan view
+chunkops.help.l3=Top menus   Switch world / dimension (Overworld·Nether·End·modded)
+chunkops.help.l4=RMB/Wheel   Menu / zoom
+chunkops.help.l5=R           Remove selection
+chunkops.help.l6=C           Clear selection
+chunkops.help.l7=T           Trim (keep selection)
+chunkops.help.l8=S           Stats of selection
+chunkops.help.l9=Ctrl+C/V    Copy / paste preview (drag, then confirm)
+chunkops.help.l10=Ctrl+Wheel  Zoom map
+chunkops.help.l11=ESC         Back to main menu
+chunkops.help.close=Click anywhere to close
+
+# ---- Paste preview ----
+chunkops.paste.previewLabel=Paste preview %dx%d → (%d,%d) | drag to place · Ctrl+V to confirm · Esc to cancel
+
+# ---- Editor log ----
+chunkops.log.readonlyOn=Read-only mode ON (the save will not be written)
+chunkops.log.readonlyOff=Read-only mode OFF
+chunkops.log.noWorld=No world selected
+chunkops.log.readonlyBlocked=[Read-only] Operation skipped
+chunkops.log.sessionLock=[Warning] session.lock found — the save may be in use by a running game; continuing can corrupt it!
+chunkops.log.selectFirst=Select chunks first (drag with the left mouse button)
+chunkops.log.selection=Selection [%d..%d, %d..%d] %dx%d chunks
+chunkops.log.copied=Copied %d chunks to clipboard (name-canonical, source %d,%d)
+chunkops.log.copyFailed=Copy failed
+chunkops.log.unknownWarn=[Warning] %d block id(s) in the source area are unknown to this session
+chunkops.log.unknownChunks=Chunks with unknown ids: %s
+chunkops.log.andMore=and %d more
+chunkops.log.unknownWhy=Quark/Forestry-style blocks get a new id on every launch
+chunkops.log.unknownAdvice=Tip: build in a fresh world → save and quit to title (keep the game open) → copy again
+chunkops.log.clipboardEmpty=Clipboard is empty (copy a selection first)
+chunkops.log.pastePreview=Paste preview: %dx%d chunks — drag to place, Ctrl+V to confirm, ESC to cancel
+chunkops.log.pasteCancelled=Paste cancelled
+chunkops.log.selectionCleared=Selection cleared
+chunkops.log.switchDim=Switched to dimension: %s (DIM%s)
+chunkops.log.switchWorld=Switched to world: %s
+
+# ---- Operation results (GuiOps) ----
+chunkops.op.dryRun= [dry-run]
+chunkops.op.removed=Removed chunk (%d,%d)
+chunkops.op.removeFailed=Remove failed: %s
+chunkops.op.cleared=Cleared chunk (%d,%d)
+chunkops.op.clearFailed=Clear failed: %s
+chunkops.op.trimmed=Trimmed (kept [%d..%d, %d..%d])
+chunkops.op.trimFailed=Trim failed: %s
+chunkops.op.clipboardEmpty=Clipboard is empty
+chunkops.op.noRegionDir=Target directory has no region folder
+chunkops.op.pasteChunkFailed=Paste failed (%d,%d): %s
+chunkops.op.pasteDone=Pasted %d chunks → target (%d,%d)
+chunkops.op.pasteDoneRegion=Pasted %d chunks → target (%d,%d), %d region file(s)
+chunkops.op.pasteDoneErrors=Pasted %d chunks (%d failed: %s)
+chunkops.op.pasteFallback=; %d blocks fell back (%d types: %s)
+chunkops.op.pasteErrors=; %d failed: %s
+chunkops.op.pasteFailed=Paste failed: %s
+chunkops.op.pasteVerifyFail=Pasted %d chunks → target (%d,%d), but read-back verification failed for %d chunk(s) — data is corrupted, do NOT load the world and please report the log
+
+# ---- Mod entry screen (Mods list → Config) ----
+chunkops.config.title=ChunkOps Chunk Editor
+chunkops.config.hint1=Note: the main-menu button can be hidden by main-menu mods (FancyMenu and alike),
+chunkops.config.hint2=Mods list → ChunkOps → Config always works as an entry point.
