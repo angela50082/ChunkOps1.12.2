@@ -202,6 +202,7 @@
 
 - [Minecraft Forge](https://files.minecraftforge.net/) —— 模组开发框架
 - **MCA Selector** —— 区块编辑器交互的灵感来源
+- **DeepSeek（AI 助手）** —— 协助完成程序、美术（封面 / 图标）与文案（README、百科资料），方案决策与游戏内实测由作者负责
 - 测试期间帮忙复现问题、提供存档样本的玩家
 
 ---
@@ -300,5 +301,7 @@ existing regions may be re-interpreted (wrong variants / air). Always back up yo
 Client-side, single-player, Minecraft 1.12.2 only. License: **MIT**.
 
 The UI is localized (`en_us` / `zh_cn`) and follows your game language setting; the mod-list name is fixed as `! ChunkOps`.
+
+**Credits:** developed by [angela50082](https://github.com/angela50082); code, artwork (cover/logo) and documentation were produced with assistance from **DeepSeek (AI)**, with all design decisions and in-game testing done by the author.
 
 </details>
