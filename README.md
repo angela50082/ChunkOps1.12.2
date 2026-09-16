@@ -237,6 +237,13 @@ export JAVA_HOME=<jdk8 目录>          # 1.12.2 必须 JDK 8
 - 开发客户端：`./gradlew runClient`（需要图形环境）；
 - 首次构建要从 `maven.minecraftforge.net` 下载 MC/Forge/MCP（几百 MB）；国内网络慢可把 `build.gradle` 里的 maven 换成注释中的 BMCLAPI 镜像。
 
+### 发布到 MC百科
+
+提交用的逐项材料（表单怎么填、简介正文、封面、收录后要补的教程、易被打回的点）见 [`docs/MC百科提交材料.md`](docs/MC百科提交材料.md)，
+配图在 `docs/artwork/`（`mcmod-cover-240x150.png` 正好是百科要求的封面尺寸）。
+
+> 顺序建议：先把代码 push 上去 → 打标签发一个 Release（保证「下载」链接可用）→ 再去百科提交。
+
 ### 发布新版本（CI 全自动）
 
 `.github/workflows/` 下有两个工作流，**不需要配置任何密钥**（用 Actions 自带的 `GITHUB_TOKEN`）：
