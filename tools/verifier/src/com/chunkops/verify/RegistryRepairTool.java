@@ -62,6 +62,30 @@ public class RegistryRepairTool {
                 System.out.println("已写入世界指纹: " + SnapshotStore.worldMarkFile(worldDir)
                         + "  (hash=" + SnapshotStore.shortHash(hash) + ", snapshot=" + arch.getName() + ")");
             }
+        } else if ("audit".equals(cmd)) {
+            // 审计：按 old 快照给每个 stateId 取名字 → 用 new 快照查回 id → 再用 new 快照取名字，
+            // 名字应当不变。变了就说明"同一 id 对应多个名字"（无效 meta 归一化）导致了映射歧义。
+            RegistrySnapshot oldSnap = RegistrySnapshot.load(new File(args[1]));
+            RegistrySnapshot curSnap = RegistrySnapshot.load(new File(args[2]));
+            java.util.Map<Integer, String> seenName = new java.util.TreeMap<Integer, String>();
+            long checked = 0, unstable = 0, dupName = 0;
+            java.util.Map<String, Integer> badExample = new java.util.TreeMap<String, Integer>();
+            for (RegistrySnapshot.BlockEntry e : oldSnap.blocks) {
+                if (e.id == 0) continue;
+                String canonical = oldSnap.lookupBlockName(e.id);   // 反向表（唯一）
+                Integer curId = curSnap.lookupBlockId(canonical);
+                if (curId == null) continue;
+                String back = curSnap.lookupBlockName(curId.intValue());
+                checked++;
+                if (!canonical.equals(back)) {
+                    unstable++;
+                    if (badExample.size() < 12) badExample.put(canonical + " → " + back, 1);
+                }
+                if (!e.name.equals(canonical)) dupName++;
+            }
+            System.out.println("按名字对齐的往返检查: 共 " + checked + " 个状态，不稳定 " + unstable
+                    + "（旧快照里「同 id 多名」的条目数 " + dupName + "）");
+            for (String s : badExample.keySet()) System.out.println("  ⚠ " + s);
         } else if ("layer".equals(cmd)) {
             // 底层体检：正常世界的 Y=0 section 最底层应该是基岩（minecraft:bedrock#15）。
             // 若编号被改错（例如按错误的映射表"修复"过），这里会显示成别的方块——最直接的判据。

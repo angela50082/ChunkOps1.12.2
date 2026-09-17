@@ -31,6 +31,8 @@ public class ChunkOpsEditorScreen extends GuiScreen {
     private int selectedWorld = -1;
     /** 当前存档的编号指纹是否与本次会话不一致（不一致=旧数据会被错误解释，需修复）。 */
     private boolean registryDrift = false;
+    /** 抽样自检发现数据与当前编号不符（多半被回滚/外部改动过）。 */
+    private boolean foreignNumbering = false;
     private File currentWorldDir = null;
     /** 当前维度目录（含 region/）：主世界=存档根，其他维度=存档/DIMn——地图与所有选区操作都用它。 */
     private File currentDimDir = null;
@@ -150,11 +152,17 @@ public class ChunkOpsEditorScreen extends GuiScreen {
         try {
             GuiOps.ensureWorldMark(currentWorldDir);
             registryDrift = !GuiOps.worldMarkMatches(currentWorldDir);
+            if (!registryDrift && currentDimDir != null) {
+                // 指纹说没问题，但数据可能被回滚/外部改过：抽样看有没有大量认不出的编号
+                foreignNumbering = GuiOps.sampleUnknownRatio(currentDimDir, 24) > 0.02;
+            }
         } catch (Throwable ignored) {
             // 指纹读写失败：静默（不影响编辑功能）
         }
         if (registryDrift) {
             logLine(ChunkOpsLang.t("chunkops.log.driftWarn"));
+        } else if (foreignNumbering) {
+            logLine(ChunkOpsLang.t("chunkops.log.foreignWarn"));
         } else if (ChunkOpsRepairScreen.consumeRepaired(currentWorldDir)) {
             logLine(ChunkOpsLang.t("chunkops.log.driftFixed"));
         }
@@ -402,14 +410,14 @@ public class ChunkOpsEditorScreen extends GuiScreen {
         }
         this.fontRenderer.drawString(ChunkOpsLang.t("chunkops.ui.status",
                 worlds.size(), loadedCount, renderer.queuedCount(), renderer.absentCount()),
-                dbx + dbw + 8, 10, 0xFF9FA6AD);
+                dbx + dbw + 8, this.height - 24, 0xFF9FA6AD);
         // 编号漂移标记（阶段 A）：该存档不是当前这套编号写的，点右上「修复编号」
         if (registryDrift) {
             String chip = ChunkOpsLang.t("chunkops.ui.drift");
             int chipW = this.fontRenderer.getStringWidth(chip);
             int chipX = this.width - PANEL_W - chipW - 14;
             drawRect(chipX - 6, 5, this.width - PANEL_W - 6, 23, 0x66FF4444);
-            this.fontRenderer.drawString(chip, chipX, 10, 0xFFFF7777);
+            this.fontRenderer.drawString(chip, chipX, this.height - 24, 0xFFFF7777);
         }
 
         // ---- 维度下拉（主世界 / 下界 / 末地 / 模组维度） ----
@@ -985,8 +993,7 @@ public class ChunkOpsEditorScreen extends GuiScreen {
         } else if (op.equals("stats")) {
             String s = GuiOps.statsArea(currentDimDir, selMinCx, selMaxCx, selMinCz, selMaxCz);
             for (String line : s.split("\n")) logLine(line);
-        } else if (op.equals("copy")) {
-            if (registryDrift) {
+        } else if (op.equals("copy")) {            if (registryDrift || foreignNumbering) {
                 // 编号漂移时，源区数字会被当前注册表认成别的方块 → 名称化结果必错，直接拦住
                 logLine(ChunkOpsLang.t("chunkops.log.driftCopyBlocked"));
                 return;

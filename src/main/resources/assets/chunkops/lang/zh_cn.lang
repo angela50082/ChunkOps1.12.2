@@ -144,3 +144,4 @@ chunkops.log.clipboardCleared=编号已修复：剪贴板已作废（剪贴板�
 chunkops.log.driftCopyBlocked=[已阻止] 该存档编号已漂移，现在复制会把方块名认错——请先点右上「修复编号」再复制
 chunkops.log.driftPasteWarn=[警告] 该存档编号已漂移：粘贴内容本身经名称化转换（不会错），但目标区域原有方块仍是旧编号
 chunkops.log.pasteUnknownWarn=[警告] 剪贴板里有当前注册表认不出的方块编号：再按一次 Ctrl+V 仍会写入，但这些方块在目标世界会显示成别的方块
+chunkops.log.foreignWarn=[警告] 抽样自检：这个存档的数据与当前编号不符（可能被回滚或外部改过），从它复制会串成同族的错误方块——请先用「修复编号」对齐

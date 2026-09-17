@@ -269,6 +269,59 @@ public class GuiOps {
         return out;
     }
 
+    /**
+     * 抽样自检（防"数据与指纹不符"）：随机抽 sampleChunks 个区块，统计当前快照认不出的
+     * palette 项比例。用途：存档被回滚/被外部工具改过、或经历过更早的编号变动时，
+     * 指纹仍显示"一致"，但数据其实已经不是当前编号——此时复制会静默串块。
+     * 只读 palette，不解 4096 个方块，几十个区块毫秒级。
+     */
+    public static double sampleUnknownRatio(File dimDir, int sampleChunks) {
+        if (dimDir == null) return 0.0;
+        com.chunkops.core.RegistrySnapshot snap;
+        try {
+            snap = liveSnapshot();
+        } catch (Throwable t) {
+            return 0.0;
+        }
+        File regionDir = new File(dimDir, "region");
+        File[] regions = regionDir.listFiles();
+        if (regions == null) return 0.0;
+        java.util.Arrays.sort(regions);
+        long total = 0, unknown = 0;
+        int taken = 0;
+        for (File region : regions) {
+            if (taken >= sampleChunks) break;
+            if (!region.isFile() || !region.getName().endsWith(".mca")) continue;
+            try {
+                com.chunkops.verify.RegionReader rr = new com.chunkops.verify.RegionReader(region);
+                for (int idx = 0; idx < 1024 && taken < sampleChunks; idx += 37) { // 稀疏抽样
+                    byte[] payload = rr.readChunkData(idx);
+                    if (payload == null) continue;
+                    com.chunkops.verify.NbtNode root;
+                    try {
+                        root = com.chunkops.core.RegionWriter.unpackChunk(payload);
+                    } catch (Exception e) {
+                        continue;
+                    }
+                    com.chunkops.verify.NbtNode level = root.get("Level");
+                    if (level == null) continue;
+                    taken++;
+                    for (com.chunkops.verify.NbtNode sec : com.chunkops.core.SectionCodec.sectionsOf(level)) {
+                        com.chunkops.verify.NbtNode pal = sec.get("Palette");
+                        if (pal == null || pal.type != com.chunkops.verify.NbtNode.TAG_INT_ARRAY) continue;
+                        for (int v : (int[]) pal.value) {
+                            if (v == 0) continue;
+                            total++;
+                            if (snap.lookupBlockName(v) == null) unknown++;
+                        }
+                    }
+                }
+            } catch (Exception ignored) {
+                // 单个 region 读失败不影响整体判断
+            }
+        }
+        return total == 0 ? 0.0 : (double) unknown / (double) total;
+    }
     // ------------------------------------------------------------ 名称化剪贴板（跨模组集安全）
 
     /** 活注册表快照（会话级缓存）。优先使用 registry-snapshot.json（模组 init 导出，经验证保真）；
