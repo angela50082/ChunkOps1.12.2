@@ -43,6 +43,8 @@ public final class RegistryRepair {
         public long elapsedMs;
         public final Map<String, Long> unmappableNames = new TreeMap<String, Long>();
         public final List<String> notes = new ArrayList<String>();
+        /** 本次真正写过的 region 文件（撤销修复时按这些文件回滚）。 */
+        public final List<File> writtenRegions = new ArrayList<File>();
 
         public void addUnmappable(String name) {
             Long c = unmappableNames.get(name);
@@ -159,6 +161,7 @@ public final class RegistryRepair {
         }
         writer.write(); // 自动 .mcabackup 备份 + 原子写
         report.chunksWritten += changedIndex.size();
+        report.writtenRegions.add(region);
 
         // 回读校验：写进去的区块必须还能解析出 Level
         RegionReader rr = new RegionReader(region);

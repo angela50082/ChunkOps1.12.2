@@ -20,6 +20,7 @@ public class ChunkOpsRepairScreen extends GuiScreen {
     private static final int BTN_SCAN = 1;
     private static final int BTN_APPLY = 2;
     private static final int BTN_BACK = 3;
+    private static final int BTN_UNDO = 4;
 
     private final GuiScreen parent;
     private final File worldDir;
@@ -30,6 +31,10 @@ public class ChunkOpsRepairScreen extends GuiScreen {
     private volatile String error = null;
     private volatile boolean busy = false;
     private boolean scanned = false;
+    /** 修复前保存的存档指纹（撤销时要还原回去）与写过的 region。 */
+    private com.chunkops.core.SnapshotStore.WorldMark markBeforeRepair = null;
+    private final java.util.List<File> writtenRegions = new java.util.ArrayList<File>();
+    private volatile String undoStatus = null;
 
     private String curHash = "-";
     private String markHash = null;
@@ -91,12 +96,20 @@ public class ChunkOpsRepairScreen extends GuiScreen {
         this.buttonList.add(apply);
         this.buttonList.add(new GuiButton(BTN_BACK, cx + 75, y, 130, 20,
                 ChunkOpsLang.t("chunkops.repair.back")));
+        GuiButton undo = new GuiButton(BTN_UNDO, cx - 205, y - 26, 410, 20,
+                ChunkOpsLang.t("chunkops.repair.undo"));
+        undo.enabled = !writtenRegions.isEmpty() && !busy;
+        this.buttonList.add(undo);
     }
 
     @Override
     protected void actionPerformed(GuiButton button) {
         if (button.id == BTN_BACK) {
             net.minecraft.client.Minecraft.getMinecraft().displayGuiScreen(parent);
+            return;
+        }
+        if (button.id == BTN_UNDO) {
+            undoRepair();
             return;
         }
         if (button.id == BTN_SCAN) {
@@ -116,6 +129,50 @@ public class ChunkOpsRepairScreen extends GuiScreen {
         }
     }
 
+    /** 撤销修复：把本次写过的 region 用对应 .mcabackup（修复前的备份）还原，并还原存档指纹。 */
+    private void undoRepair() {
+        if (busy || writtenRegions.isEmpty()) return;
+        busy = true;
+        error = null;
+        status = ChunkOpsLang.t("chunkops.repair.busy");
+        Thread t = new Thread(new Runnable() {
+            public void run() {
+                int restored = 0;
+                try {
+                    for (File region : writtenRegions) {
+                        File dir = region.getParentFile();
+                        String prefix = region.getName() + ".";
+                        File newest = null;
+                        File[] files = dir.listFiles();
+                        if (files != null) {
+                            for (File f2 : files) {
+                                if (!f2.isFile() || !f2.getName().startsWith(prefix)
+                                        || !f2.getName().endsWith(".mcabackup")) continue;
+                                if (newest == null || f2.lastModified() > newest.lastModified()) newest = f2;
+                            }
+                        }
+                        if (newest == null) continue;
+                        java.nio.file.Files.copy(newest.toPath(), region.toPath(),
+                                java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                        restored++;
+                    }
+                    if (markBeforeRepair != null) {
+                        com.chunkops.core.SnapshotStore.writeWorldMark(worldDir, markBeforeRepair);
+                    }
+                    writtenRegions.clear();
+                    report = null;
+                    scanned = false;
+                } catch (Throwable t2) {
+                    error = String.valueOf(t2);
+                } finally {
+                    undoStatus = ChunkOpsLang.t("chunkops.repair.undoDone", Integer.valueOf(restored));
+                    busy = false;
+                }
+            }
+        }, "chunkops-undo");
+        t.setDaemon(true);
+        t.start();
+    }
     private void start(final boolean apply) {
         if (busy) return;
         busy = true;
@@ -132,6 +189,7 @@ public class ChunkOpsRepairScreen extends GuiScreen {
                     RegistrySnapshot oldSnap = RegistrySnapshot.load(snapFile);
                     RegistrySnapshot curSnap = GuiOps.liveSnapshot();
                     RegistryDrift drift = RegistryDrift.build(oldSnap, curSnap);
+                    if (apply && markBeforeRepair == null) markBeforeRepair = GuiOps.worldMark(worldDir);
                     // 编号漂移是全存档性质的：只修主世界、放着下界/末地/模组维度不管，会留下不一致的存档，
                     // 所以这里对**所有带 region 的维度目录**都跑一遍（同一个漂移表）。
                     RegistryRepair.Report total = new RegistryRepair.Report();
@@ -143,6 +201,7 @@ public class ChunkOpsRepairScreen extends GuiScreen {
                     }
                     total.notes.add("维度 " + dims + " 个");
                     report = total;
+                    if (apply) { writtenRegions.clear(); writtenRegions.addAll(total.writtenRegions); }
                     if (apply && report.chunksWritten > 0) {
                         GuiOps.writeWorldMark(worldDir); // 修完就是当前编号了
                         repairedWorldPath = worldDir.getAbsolutePath();
@@ -218,6 +277,10 @@ public class ChunkOpsRepairScreen extends GuiScreen {
                             Long.valueOf(r.paletteRemapped), Long.valueOf(r.biomeRemapped)),
                     cx, y, 0xAAAAAA);
             y += 14;
+            if (undoStatus != null) {
+                this.drawCenteredString(this.fontRenderer, undoStatus, cx, y, 0xFFAA55);
+                y += 14;
+            }
             if (r.applied) {
                 this.drawCenteredString(this.fontRenderer,
                         ChunkOpsLang.t("chunkops.repair.applyResult",
