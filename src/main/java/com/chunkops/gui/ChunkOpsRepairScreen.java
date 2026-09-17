@@ -314,12 +314,16 @@ public class ChunkOpsRepairScreen extends GuiScreen {
         }
 
         // 底部说明（多行短句）
-        int hy = this.height - 96;
+        int hy = this.height - 126;
         for (String s : new String[]{
                 ChunkOpsLang.t("chunkops.repair.hint1"),
                 ChunkOpsLang.t("chunkops.repair.hint2")}) {
             this.drawCenteredString(this.fontRenderer, s, cx, hy, 0x777777);
             hy += 12;
+        }
+        // 撤销按钮的可用状态每帧刷新（修复完成后才有写入记录，而 initGui 只在打开时跑一次）
+        for (GuiButton b : this.buttonList) {
+            if (b.id == BTN_UNDO) b.enabled = !writtenRegions.isEmpty() && !busy;
         }
 
         super.drawScreen(mouseX, mouseY, partialTicks);
