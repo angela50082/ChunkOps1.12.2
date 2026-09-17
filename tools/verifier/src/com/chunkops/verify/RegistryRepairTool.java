@@ -62,6 +62,53 @@ public class RegistryRepairTool {
                 System.out.println("已写入世界指纹: " + SnapshotStore.worldMarkFile(worldDir)
                         + "  (hash=" + SnapshotStore.shortHash(hash) + ", snapshot=" + arch.getName() + ")");
             }
+        } else if ("layer".equals(cmd)) {
+            // 底层体检：正常世界的 Y=0 section 最底层应该是基岩（minecraft:bedrock#15）。
+            // 若编号被改错（例如按错误的映射表"修复"过），这里会显示成别的方块——最直接的判据。
+            File dimDir = new File(args[1]);
+            RegistrySnapshot s = RegistrySnapshot.load(new File(args[2]));
+            String regionName = args.length >= 4 ? args[3] : "r.0.0.mca";
+            java.io.File region = new java.io.File(new java.io.File(dimDir, "region"), regionName);
+            RegionReader rr = new RegionReader(region);
+            java.util.Map<String, Long> bottom = new java.util.TreeMap<String, Long>();
+            int chunkCount = 0;
+            int noBedrock = 0;
+            for (int idx = 0; idx < com.chunkops.verify.RegionReader.CHUNKS_PER_REGION; idx++) {
+                byte[] payload = rr.readChunkData(idx);
+                if (payload == null) continue;
+                com.chunkops.verify.NbtNode root;
+                try {
+                    root = com.chunkops.core.RegionWriter.unpackChunk(payload);
+                } catch (Exception e) {
+                    continue;
+                }
+                com.chunkops.verify.NbtNode level = root.get("Level");
+                if (level == null) continue;
+                for (com.chunkops.verify.NbtNode sec : com.chunkops.core.SectionCodec.sectionsOf(level)) {
+                    if (com.chunkops.core.SectionCodec.sectionY(sec) != 0) continue;
+                    int[] ids = com.chunkops.core.SectionCodec.decode(sec);
+                    if (ids == null) continue;
+                    chunkCount++;
+                    boolean hasBedrock = false;
+                    for (int i = 0; i < 256; i++) { // y=0 这一层（索引 0..255）
+                        String name = s.lookupBlockName(ids[i]);
+                        if (name == null) name = "UNKNOWN:" + ids[i];
+                        if ("minecraft:bedrock#15".equals(name) || name.startsWith("minecraft:bedrock")) hasBedrock = true;
+                        if (ids[i] == 0) name = "(air)";
+                        Long c = bottom.get(name);
+                        bottom.put(name, c == null ? 1 : c + 1);
+                    }
+                    if (!hasBedrock) noBedrock++;
+                }
+            }
+            System.out.println(regionName + " Y=0 section 数 " + chunkCount
+                    + "，其中底层无基岩的 " + noBedrock + (chunkCount == 0 ? "" : ("（无基岩比例 "
+                    + (100 * noBedrock / Math.max(1, chunkCount)) + "%）")));
+            int n = 0;
+            for (java.util.Map.Entry<String, Long> e : bottom.entrySet()) {
+                if (n++ >= 10) { System.out.println("  …"); break; }
+                System.out.println("  底层 " + e.getKey() + " x" + e.getValue());
+            }
         } else if ("shift".equals(cmd)) {
             RegistrySnapshot s = RegistrySnapshot.load(new File(args[1]));
             int off = Integer.parseInt(args[3]);

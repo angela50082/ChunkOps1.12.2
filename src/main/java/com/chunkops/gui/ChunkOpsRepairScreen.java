@@ -136,6 +136,10 @@ public class ChunkOpsRepairScreen extends GuiScreen {
                     if (apply && report.chunksWritten > 0) {
                         GuiOps.writeWorldMark(worldDir); // 修完就是当前编号了
                         repairedWorldPath = worldDir.getAbsolutePath();
+                        // 关键：剪贴板里是修复前的原始数字，用它粘贴会出错，必须作废
+                        if (parent instanceof ChunkOpsEditorScreen) {
+                            ((ChunkOpsEditorScreen) parent).onWorldRegistryRepaired();
+                        }
                     }
                 } catch (Throwable t2) {
                     error = String.valueOf(t2);

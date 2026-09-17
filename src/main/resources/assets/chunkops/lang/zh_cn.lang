@@ -140,3 +140,6 @@ chunkops.repair.failed=失败: %s
 chunkops.repair.noSnapshot=缺少当时的快照文件，无法修复（只记录了编号指纹）
 chunkops.repair.hint1=原理：区块里的方块只是 palette 索引，真正的编号在 palette 数组里，
 chunkops.repair.hint2=用存档记录的旧快照按「方块名+meta」对齐后改写即可；写入前自动备份（.mcabackup）
+chunkops.log.clipboardCleared=编号已修复：剪贴板已作废（剪贴板里是修复前的数字，请重新复制）
+chunkops.log.driftCopyBlocked=[已阻止] 该存档编号已漂移，现在复制会把方块名认错——请先点右上「修复编号」再复制
+chunkops.log.driftPasteWarn=[警告] 该存档编号已漂移：粘贴内容本身经名称化转换（不会错），但目标区域原有方块仍是旧编号

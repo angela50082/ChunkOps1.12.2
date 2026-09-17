@@ -920,6 +920,20 @@ public class ChunkOpsEditorScreen extends GuiScreen {
         }
     }
 
+    /**
+     * 编号被修复后调用（由 {@link ChunkOpsRepairScreen} 回调）：
+     * 剪贴板里存的是**修复前**读到的原始数字，用它粘贴出来的内容会是错的，必须作废。
+     */
+    public void onWorldRegistryRepaired() {
+        boolean had = clipboard != null && !clipboard.isEmpty();
+        clipboard = null;
+        clipboardNamed = null;
+        pastePreview = false;
+        previewTiles = null;
+        registryDrift = false;
+        if (had) logLine(ChunkOpsLang.t("chunkops.log.clipboardCleared"));
+    }
+
     /** 执行选区操作（含 session.lock 与只读检查）。操作对象 = 当前维度目录。 */
     private void runSelectionOp(String op) {
         if (currentDimDir == null) {
@@ -967,6 +981,11 @@ public class ChunkOpsEditorScreen extends GuiScreen {
             String s = GuiOps.statsArea(currentDimDir, selMinCx, selMaxCx, selMinCz, selMaxCz);
             for (String line : s.split("\n")) logLine(line);
         } else if (op.equals("copy")) {
+            if (registryDrift) {
+                // 编号漂移时，源区数字会被当前注册表认成别的方块 → 名称化结果必错，直接拦住
+                logLine(ChunkOpsLang.t("chunkops.log.driftCopyBlocked"));
+                return;
+            }
             clipboard = GuiOps.copyArea(currentDimDir, selMinCx, selMaxCx, selMinCz, selMaxCz);
             clipboardNamed = clipboard != null ? GuiOps.exportClipboardNamed(clipboard) : null;
             clipOriginCx = selMinCx;
@@ -999,6 +1018,7 @@ public class ChunkOpsEditorScreen extends GuiScreen {
             }
             if (pastePreview) {
                 // 确认：名称化导入（按名+meta 反解活注册表，不串块）→ 写入预览目标
+                if (registryDrift) logLine(ChunkOpsLang.t("chunkops.log.driftPasteWarn"));
                 logLine(GuiOps.pasteAreaNamed(currentDimDir, clipboardNamed,
                         clipOriginCx, clipOriginCz, pasteTargetCx, pasteTargetCz));
                 pastePreview = false;

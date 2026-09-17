@@ -140,3 +140,6 @@ chunkops.repair.failed=Failed: %s
 chunkops.repair.noSnapshot=The snapshot from that session is missing — cannot repair (only the id fingerprint was recorded)
 chunkops.repair.hint1=How it works: block ids live in each section's palette array (the block data is just indices),
 chunkops.repair.hint2=so they are remapped by matching "block name + meta" against the recorded snapshot; .mcabackup files are created first
+chunkops.log.clipboardCleared=IDs repaired: clipboard cleared (it held pre-repair numbers — copy again)
+chunkops.log.driftCopyBlocked=[Blocked] This world uses a drifted numbering, so copying now would misname blocks — use "Fix IDs" (top right) first
+chunkops.log.driftPasteWarn=[Warning] This world uses a drifted numbering: the pasted content itself is name-mapped (correct), but the surrounding blocks are still in the old numbering
