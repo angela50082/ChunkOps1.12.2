@@ -25,9 +25,12 @@ public class ChunkOpsEditorScreen extends GuiScreen {
 
     private static final int BTN_BACK = 3;
     private static final int BTN_READONLY = 4;
+    private static final int BTN_REPAIR = 5;
 
     private final List<WorldSummary> worlds = new ArrayList<WorldSummary>();
     private int selectedWorld = -1;
+    /** 当前存档的编号指纹是否与本次会话不一致（不一致=旧数据会被错误解释，需修复）。 */
+    private boolean registryDrift = false;
     private File currentWorldDir = null;
     /** 当前维度目录（含 region/）：主世界=存档根，其他维度=存档/DIMn——地图与所有选区操作都用它。 */
     private File currentDimDir = null;
@@ -130,6 +133,28 @@ public class ChunkOpsEditorScreen extends GuiScreen {
         rebuildDims();
         renderer.clear(); // 关键：切换存档必须清空地图缓存（含进行中的异步任务），否则跨世界串图/闪烁
         mapQuadKey = "";
+        checkRegistryDrift();
+    }
+
+    /**
+     * 注册表编号漂移检查（阶段 A）：该存档是在「当前会话这套编号」下写的吗？
+     * 没有指纹的存档先记一个基线；有指纹且不一致 → 说明 mods 目录变过、编号重排了，
+     * 旧数据会被当前注册表错误解释，提示用户用「修复编号」对齐。
+     */
+    private void checkRegistryDrift() {
+        registryDrift = false;
+        if (currentWorldDir == null) return;
+        try {
+            GuiOps.ensureWorldMark(currentWorldDir);
+            registryDrift = !GuiOps.worldMarkMatches(currentWorldDir);
+        } catch (Throwable ignored) {
+            // 指纹读写失败：静默（不影响编辑功能）
+        }
+        if (registryDrift) {
+            logLine(ChunkOpsLang.t("chunkops.log.driftWarn"));
+        } else if (ChunkOpsRepairScreen.consumeRepaired(currentWorldDir)) {
+            logLine(ChunkOpsLang.t("chunkops.log.driftFixed"));
+        }
     }
 
     /** 扫描存档可用维度：主世界(region/) + DIM&lt;id&gt;/region/（下界 -1、末地 1、模组维度任意 id）。 */
@@ -214,6 +239,8 @@ public class ChunkOpsEditorScreen extends GuiScreen {
                 ChunkOpsLang.t("chunkops.button.back")));
         this.buttonList.add(new GuiButton(BTN_READONLY, this.width - 170, y, 80, 20,
                 readOnlyLabel()));
+        this.buttonList.add(new GuiButton(BTN_REPAIR, this.width - 254, y, 80, 20,
+                ChunkOpsLang.t("chunkops.button.repair")));
         worldMenuOpen = false;
         dimMenuOpen = false;
     }
@@ -373,6 +400,14 @@ public class ChunkOpsEditorScreen extends GuiScreen {
         this.fontRenderer.drawString(ChunkOpsLang.t("chunkops.ui.status",
                 worlds.size(), loadedCount, renderer.queuedCount(), renderer.absentCount()),
                 dbx + dbw + 8, 10, 0xFF9FA6AD);
+        // 编号漂移标记（阶段 A）：该存档不是当前这套编号写的，点右上「修复编号」
+        if (registryDrift) {
+            String chip = ChunkOpsLang.t("chunkops.ui.drift");
+            int chipW = this.fontRenderer.getStringWidth(chip);
+            int chipX = this.width - PANEL_W - chipW - 14;
+            drawRect(chipX - 6, 5, this.width - PANEL_W - 6, 23, 0x66FF4444);
+            this.fontRenderer.drawString(chip, chipX, 10, 0xFFFF7777);
+        }
 
         // ---- 维度下拉（主世界 / 下界 / 末地 / 模组维度） ----
         drawRect(dbx, wby, dbx + dbw, wby + wbh, dimMenuOpen || dbHover ? 0xFF2A323C : 0xFF20262C);
@@ -865,6 +900,23 @@ public class ChunkOpsEditorScreen extends GuiScreen {
             readOnly = !readOnly;
             button.displayString = readOnlyLabel();
             logLine(ChunkOpsLang.t(readOnly ? "chunkops.log.readonlyOn" : "chunkops.log.readonlyOff"));
+        } else if (button.id == BTN_REPAIR) {
+            if (currentWorldDir == null) {
+                logLine(ChunkOpsLang.t("chunkops.log.noWorld"));
+                return;
+            }
+            net.minecraft.client.Minecraft.getMinecraft().displayGuiScreen(
+                    new ChunkOpsRepairScreen(this, currentWorldDir, currentDimDir));
+        }
+    }
+
+    /** 写盘成功后：如果编号没漂移，就把存档指纹刷成当前会话（漂移时保留旧指纹，修复才有依据）。 */
+    private void afterWorldWrite() {
+        if (currentWorldDir == null || registryDrift) return;
+        try {
+            GuiOps.writeWorldMark(currentWorldDir);
+        } catch (Throwable ignored) {
+            // 指纹写入失败不影响编辑
         }
     }
 
@@ -898,6 +950,7 @@ public class ChunkOpsEditorScreen extends GuiScreen {
                 }
             }
             renderer.clear(); // 数据已变：地图缓存失效重载
+            afterWorldWrite();
         } else if (op.equals("clear")) {
             for (int cx = selMinCx; cx <= selMaxCx; cx++) {
                 for (int cz = selMinCz; cz <= selMaxCz; cz++) {
@@ -905,9 +958,11 @@ public class ChunkOpsEditorScreen extends GuiScreen {
                 }
             }
             renderer.clear();
+            afterWorldWrite();
         } else if (op.equals("trim")) {
             logLine(GuiOps.trimArea(currentDimDir, selMinCx, selMaxCx, selMinCz, selMaxCz, false));
             renderer.clear();
+            afterWorldWrite();
         } else if (op.equals("stats")) {
             String s = GuiOps.statsArea(currentDimDir, selMinCx, selMaxCx, selMinCz, selMaxCz);
             for (String line : s.split("\n")) logLine(line);
@@ -949,6 +1004,7 @@ public class ChunkOpsEditorScreen extends GuiScreen {
                 pastePreview = false;
                 previewTiles = null;
                 renderer.clear(); // 数据已变：地图缓存失效重载
+                afterWorldWrite();
             } else {
                 // 进入预览态（MCA 式：先预览，框选定位，再确认）
                 pastePreview = true;

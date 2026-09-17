@@ -160,6 +160,98 @@ public class GuiOps {
         return false;
     }
 
+    // ------------------------------------------------------------ 注册表漂移（阶段 A/B）
+
+    private static String cachedMappingHash = null;
+    private static File cachedArchive = null;
+
+    /** .minecraft 根目录。 */
+    public static File gameDir() {
+        return net.minecraftforge.fml.common.Loader.instance().getConfigDir().getParentFile();
+    }
+
+    /**
+     * 当前会话的编号映射指纹：优先读导出时写下的 registry-snapshot.hash 边车文件（瞬间），
+     * 缺失才按快照现算（587 模组时要几百毫秒，故只算一次并缓存）。
+     */
+    public static String currentMappingHash() {
+        if (cachedMappingHash != null) return cachedMappingHash;
+        try {
+            File f = new File(gameDir(), "registry-snapshot.hash");
+            if (f.isFile()) {
+                String s = new String(java.nio.file.Files.readAllBytes(f.toPath()),
+                        java.nio.charset.StandardCharsets.UTF_8).trim();
+                if (!s.isEmpty()) {
+                    cachedMappingHash = s;
+                    return s;
+                }
+            }
+        } catch (Exception ignored) {
+            // 退回现算
+        }
+        try {
+            cachedMappingHash = com.chunkops.core.SnapshotStore.mappingHash(liveSnapshot());
+        } catch (Throwable t) {
+            cachedMappingHash = "";
+        }
+        return cachedMappingHash;
+    }
+
+    /** 当前会话快照归档（幂等：内容相同只留一份）。返回归档文件，失败返回 null。 */
+    public static File currentSnapshotArchive() {
+        if (cachedArchive != null) return cachedArchive;
+        try {
+            File snap = new File(gameDir(), "registry-snapshot.json");
+            if (!snap.isFile()) return null;
+            cachedArchive = com.chunkops.core.SnapshotStore.archiveFile(gameDir(), snap);
+        } catch (Exception e) {
+            return null;
+        }
+        return cachedArchive;
+    }
+
+    /** 读取存档记录的编号指纹（没有记录 / 文件损坏都返回 null）。 */
+    public static com.chunkops.core.SnapshotStore.WorldMark worldMark(File worldDir) {
+        return com.chunkops.core.SnapshotStore.readWorldMark(worldDir);
+    }
+
+    /** 用当前会话的编号给存档打指纹（覆盖写）。 */
+    public static void writeWorldMark(File worldDir) {
+        if (worldDir == null) return;
+        try {
+            File arch = currentSnapshotArchive();
+            com.chunkops.core.SnapshotStore.WorldMark mark = new com.chunkops.core.SnapshotStore.WorldMark(
+                    currentMappingHash(), arch == null ? "" : arch.getName(), System.currentTimeMillis());
+            com.chunkops.core.SnapshotStore.writeWorldMark(worldDir, mark);
+        } catch (Exception ignored) {
+            // 打指纹失败不影响编辑功能
+        }
+    }
+
+    /** 没有指纹就记一个基线；已有则不动（保住「它当初是哪套编号」这条线索）。 */
+    public static void ensureWorldMark(File worldDir) {
+        if (worldDir == null) return;
+        if (com.chunkops.core.SnapshotStore.hasWorldMark(worldDir)) return;
+        writeWorldMark(worldDir);
+    }
+
+    /** 存档指纹是否与当前会话一致（没有指纹时返回 true，不打扰用户）。 */
+    public static boolean worldMarkMatches(File worldDir) {
+        com.chunkops.core.SnapshotStore.WorldMark mark =
+                com.chunkops.core.SnapshotStore.readWorldMark(worldDir);
+        if (mark == null) return true;
+        String cur = currentMappingHash();
+        if (cur == null || cur.isEmpty()) return true;
+        return cur.equals(mark.mappingHash);
+    }
+
+    /** 该存档记录的那份归档快照（修复要用）；缺失返回 null。 */
+    public static File worldMarkSnapshot(File worldDir) {
+        com.chunkops.core.SnapshotStore.WorldMark mark =
+                com.chunkops.core.SnapshotStore.readWorldMark(worldDir);
+        return com.chunkops.core.SnapshotStore.markSnapshotFile(gameDir(), mark);
+    }
+
     // ------------------------------------------------------------ 名称化剪贴板（跨模组集安全）
 
     /** 活注册表快照（会话级缓存）。优先使用 registry-snapshot.json（模组 init 导出，经验证保真）；

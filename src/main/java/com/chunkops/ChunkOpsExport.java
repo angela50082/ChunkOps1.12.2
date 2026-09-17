@@ -1,5 +1,6 @@
 package com.chunkops;
 
+import com.chunkops.core.SnapshotStore;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
@@ -121,10 +122,49 @@ public class ChunkOpsExport {
         } finally {
             w.close();
         }
+
+        // 编号映射指纹（阶段 A）：把「name#meta→stateId」排序后哈希，写成 registry-snapshot.hash 边车文件。
+        // 编辑器切换存档时只需读这个小文件即可判断「这个存档是不是在当前编号下写的」，不必解析整份快照
+        // （587 模组时快照十几 MB，解析要几秒）。
+        String mappingHash = mappingHash(blocks, biomes);
+        try {
+            java.io.OutputStreamWriter hw = new java.io.OutputStreamWriter(
+                    new java.io.FileOutputStream(new File(dir, "registry-snapshot.hash")),
+                    StandardCharsets.UTF_8);
+            try {
+                hw.write(mappingHash);
+            } finally {
+                hw.close();
+            }
+        } catch (IOException ignored) {
+            // 边车文件写失败不影响主流程（编辑器会退回自行计算）
+        }
+
         System.out.println("[ChunkOps] registry-snapshot.json 导出: " + out.getAbsolutePath()
                 + " (blocks=" + blockCount + ", maxBlockId=" + maxBlockId
-                + ", biomes=" + biomeCount + ", mods=" + mods.size() + ")");
+                + ", biomes=" + biomeCount + ", mods=" + mods.size()
+                + ", mappingHash=" + SnapshotStore.shortHash(mappingHash) + ")");
         return out;
+    }
+
+    /**
+     * 编号映射指纹：与 {@link com.chunkops.core.SnapshotStore#mappingHash} 必须完全一致
+     * （同样的行格式、同样的排序、同样的 sha256），世界指纹就是靠它比对的。
+     */
+    static String mappingHash(JsonArray blocks, JsonArray biomes) {
+        List<String> lines = new ArrayList<String>();
+        for (int i = 0; i < blocks.size(); i++) {
+            JsonObject o = blocks.get(i).getAsJsonObject();
+            lines.add(o.get("name").getAsString() + "=" + o.get("id").getAsInt());
+        }
+        for (int i = 0; i < biomes.size(); i++) {
+            JsonObject o = biomes.get(i).getAsJsonObject();
+            lines.add("biome:" + o.get("name").getAsString() + "=" + o.get("id").getAsInt());
+        }
+        Collections.sort(lines);
+        StringBuilder sb = new StringBuilder();
+        for (String s : lines) sb.append(s).append('\n');
+        return sha256(sb.toString());
     }
 
     static String join(List<String> list, String sep) {
