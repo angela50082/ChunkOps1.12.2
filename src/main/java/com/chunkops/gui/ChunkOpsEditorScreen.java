@@ -64,6 +64,9 @@ public class ChunkOpsEditorScreen extends GuiScreen {
     private boolean readOnly = false;
     private java.util.Map<Long, byte[]> clipboard = null; // 原始 payload（预览用）
     private byte[] clipboardNamed = null;                  // 名称化 .mcops（粘贴用——跨模组集安全）
+    /** 剪贴板里是否有当前注册表认不出的编号（有则粘贴要二次确认）。 */
+    private boolean clipboardHasUnknown = false;
+    private boolean pasteUnknownArmed = false;
     private int clipOriginCx = 0, clipOriginCz = 0; // 剪贴板源选区左上角
     /** 面板底部同步提示（logLine 时更新）。 */
     private String panelNotice = "";
@@ -928,6 +931,8 @@ public class ChunkOpsEditorScreen extends GuiScreen {
         boolean had = clipboard != null && !clipboard.isEmpty();
         clipboard = null;
         clipboardNamed = null;
+        clipboardHasUnknown = false;
+        pasteUnknownArmed = false;
         pastePreview = false;
         previewTiles = null;
         registryDrift = false;
@@ -988,6 +993,8 @@ public class ChunkOpsEditorScreen extends GuiScreen {
             }
             clipboard = GuiOps.copyArea(currentDimDir, selMinCx, selMaxCx, selMinCz, selMaxCz);
             clipboardNamed = clipboard != null ? GuiOps.exportClipboardNamed(clipboard) : null;
+            clipboardHasUnknown = com.chunkops.core.Mcops.lastExportUnknown.get() > 0;
+            pasteUnknownArmed = false;
             clipOriginCx = selMinCx;
             clipOriginCz = selMinCz;
             logLine(clipboard != null
@@ -1018,6 +1025,13 @@ public class ChunkOpsEditorScreen extends GuiScreen {
             }
             if (pastePreview) {
                 // 确认：名称化导入（按名+meta 反解活注册表，不串块）→ 写入预览目标
+                if (clipboardHasUnknown && !pasteUnknownArmed) {
+                    // 剪贴板里有当前注册表认不出的编号：它们会以原始数字写入，在目标世界显示成别的方块
+                    pasteUnknownArmed = true;
+                    logLine(ChunkOpsLang.t("chunkops.log.pasteUnknownWarn"));
+                    return;
+                }
+                pasteUnknownArmed = false;
                 if (registryDrift) logLine(ChunkOpsLang.t("chunkops.log.driftPasteWarn"));
                 logLine(GuiOps.pasteAreaNamed(currentDimDir, clipboardNamed,
                         clipOriginCx, clipOriginCz, pasteTargetCx, pasteTargetCz));

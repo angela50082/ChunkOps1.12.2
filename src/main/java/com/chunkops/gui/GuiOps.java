@@ -252,6 +252,23 @@ public class GuiOps {
         return com.chunkops.core.SnapshotStore.markSnapshotFile(gameDir(), mark);
     }
 
+    /** 一个存档里所有带 region/ 的维度目录（主世界 + DIM&lt;id&gt;）。编号漂移是全存档性质的，修复要覆盖全部。 */
+    public static java.util.List<File> dimensionDirs(File worldDir) {
+        java.util.List<File> out = new java.util.ArrayList<File>();
+        if (worldDir == null) return out;
+        if (new File(worldDir, "region").isDirectory()) out.add(worldDir);
+        File[] subs = worldDir.listFiles();
+        if (subs != null) {
+            java.util.Arrays.sort(subs);
+            for (File f : subs) {
+                if (f.isDirectory() && f.getName().startsWith("DIM") && new File(f, "region").isDirectory()) {
+                    out.add(f);
+                }
+            }
+        }
+        return out;
+    }
+
     // ------------------------------------------------------------ 名称化剪贴板（跨模组集安全）
 
     /** 活注册表快照（会话级缓存）。优先使用 registry-snapshot.json（模组 init 导出，经验证保真）；

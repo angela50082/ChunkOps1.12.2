@@ -132,7 +132,17 @@ public class ChunkOpsRepairScreen extends GuiScreen {
                     RegistrySnapshot oldSnap = RegistrySnapshot.load(snapFile);
                     RegistrySnapshot curSnap = GuiOps.liveSnapshot();
                     RegistryDrift drift = RegistryDrift.build(oldSnap, curSnap);
-                    report = RegistryRepair.repair(dimDir, drift, apply);
+                    // 编号漂移是全存档性质的：只修主世界、放着下界/末地/模组维度不管，会留下不一致的存档，
+                    // 所以这里对**所有带 region 的维度目录**都跑一遍（同一个漂移表）。
+                    RegistryRepair.Report total = new RegistryRepair.Report();
+                    total.applied = apply;
+                    int dims = 0;
+                    for (File dim : GuiOps.dimensionDirs(worldDir)) {
+                        dims++;
+                        merge(total, RegistryRepair.repair(dim, drift, apply));
+                    }
+                    total.notes.add("维度 " + dims + " 个");
+                    report = total;
                     if (apply && report.chunksWritten > 0) {
                         GuiOps.writeWorldMark(worldDir); // 修完就是当前编号了
                         repairedWorldPath = worldDir.getAbsolutePath();
@@ -150,6 +160,28 @@ public class ChunkOpsRepairScreen extends GuiScreen {
         }, "chunkops-repair");
         t.setDaemon(true);
         t.start();
+    }
+
+    /** 汇总各维度的报告。 */
+    private static void merge(RegistryRepair.Report total, RegistryRepair.Report r) {
+        total.regionFiles += r.regionFiles;
+        total.chunksSeen += r.chunksSeen;
+        total.chunksChanged += r.chunksChanged;
+        total.chunksWritten += r.chunksWritten;
+        total.paletteEntries += r.paletteEntries;
+        total.paletteRemapped += r.paletteRemapped;
+        total.biomeEntries += r.biomeEntries;
+        total.biomeRemapped += r.biomeRemapped;
+        total.legacySections += r.legacySections;
+        total.unmappablePalette += r.unmappablePalette;
+        total.unmappableBiomes += r.unmappableBiomes;
+        total.verifyFailed += r.verifyFailed;
+        total.elapsedMs += r.elapsedMs;
+        for (java.util.Map.Entry<String, Long> e : r.unmappableNames.entrySet()) {
+            Long c = total.unmappableNames.get(e.getKey());
+            total.unmappableNames.put(e.getKey(), c == null ? e.getValue() : c + e.getValue());
+        }
+        total.notes.addAll(r.notes);
     }
 
     @Override
@@ -207,7 +239,7 @@ public class ChunkOpsRepairScreen extends GuiScreen {
                 y += 14;
                 int n = 0;
                 for (java.util.Map.Entry<String, Long> e : r.unmappableNames.entrySet()) {
-                    if (n++ >= 3) break;
+                    if (n++ >= 8) break;
                     this.drawCenteredString(this.fontRenderer,
                             "  " + e.getKey() + " x" + e.getValue(), cx, y, 0x888888);
                     y += 12;
