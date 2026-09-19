@@ -116,9 +116,6 @@ chunkops.config.hint1=Note: the main-menu button can be hidden by main-menu mods
 chunkops.config.hint2=Mods list → ChunkOps → Config always works as an entry point.
 
 # ---- Registry id drift / repair (phase A/B) ----
-chunkops.ui.drift=⚠ ID drift
-chunkops.button.repair=Fix IDs
-chunkops.log.driftWarn=[Warning] This world was written under a different set of block ids (the mods folder changed, so ids were renumbered). Editing it or loading it in game will show wrong blocks — use "Fix IDs" (top right) to realign
 chunkops.log.driftFixed=Ids repaired and aligned with this session
 chunkops.repair.title=Registry id repair
 chunkops.repair.current=This session: %s
@@ -143,7 +140,6 @@ chunkops.repair.hint2=so they are remapped by matching "block name + meta" again
 chunkops.log.clipboardCleared=IDs repaired: clipboard cleared (it held pre-repair numbers — copy again)
 chunkops.log.driftPasteWarn=[Warning] This world uses a drifted numbering: the pasted content itself is name-mapped (correct), but the surrounding blocks are still in the old numbering
 chunkops.log.pasteUnknownWarn=[Warning] The clipboard contains ids this registry cannot resolve: pressing Ctrl+V again will still write them, but they will show up as other blocks in the target world
-chunkops.log.foreignWarn=[Warning] Sampling check: this world's data does not match the current numbering (it was rolled back or changed externally) — copying from it would silently corrupt blocks. Run "Fix IDs" first
 chunkops.repair.undo=Undo repair (restore from .mcabackup)
 chunkops.repair.undoDone=Undone: %d region(s) restored from the pre-repair backups, and the world fingerprint was rolled back
 chunkops.log.copySrcSnap=Copy: block ids interpreted with the source world's recorded snapshot (%s)
