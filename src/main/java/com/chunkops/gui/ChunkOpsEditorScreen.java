@@ -993,13 +993,25 @@ public class ChunkOpsEditorScreen extends GuiScreen {
         } else if (op.equals("stats")) {
             String s = GuiOps.statsArea(currentDimDir, selMinCx, selMaxCx, selMinCz, selMaxCz);
             for (String line : s.split("\n")) logLine(line);
-        } else if (op.equals("copy")) {            if (registryDrift || foreignNumbering) {
-                // 编号漂移时，源区数字会被当前注册表认成别的方块 → 名称化结果必错，直接拦住
-                logLine(ChunkOpsLang.t("chunkops.log.driftCopyBlocked"));
-                return;
+        } else if (op.equals("copy")) {            // 用源存档自己的编号快照解释源区块的数字（跨会话搬运的正确做法；
+            // 编号转换发生在粘贴那一刻，且只作用于粘贴出来的区块）。
+            java.io.File srcSnapFile = GuiOps.worldMarkSnapshot(currentWorldDir);
+            com.chunkops.core.RegistrySnapshot srcSnap = null;
+            if (srcSnapFile != null) {
+                try {
+                    srcSnap = com.chunkops.core.RegistrySnapshot.load(srcSnapFile);
+                } catch (Exception ignored) {
+                    srcSnap = null;
+                }
+            }
+            if (srcSnap == null) {
+                logLine(ChunkOpsLang.t("chunkops.log.copySrcSnapMissing"));
+                srcSnap = GuiOps.liveSnapshot();
+            } else {
+                logLine(ChunkOpsLang.t("chunkops.log.copySrcSnap", srcSnapFile.getName()));
             }
             clipboard = GuiOps.copyArea(currentDimDir, selMinCx, selMaxCx, selMinCz, selMaxCz);
-            clipboardNamed = clipboard != null ? GuiOps.exportClipboardNamed(clipboard) : null;
+            clipboardNamed = clipboard != null ? GuiOps.exportClipboardNamed(clipboard, srcSnap) : null;
             clipboardHasUnknown = com.chunkops.core.Mcops.lastExportUnknown.get() > 0;
             pasteUnknownArmed = false;
             clipOriginCx = selMinCx;

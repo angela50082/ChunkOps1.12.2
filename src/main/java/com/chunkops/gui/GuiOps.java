@@ -379,12 +379,22 @@ public class GuiOps {
 
     /** 把原始剪贴板 payload 导出为名称化 .mcops（跨模组集安全：方块/生物群系按名+meta 存储）。 */
     public static byte[] exportClipboardNamed(java.util.Map<Long, byte[]> clipboard) {
+        return exportClipboardNamed(clipboard, liveSnapshot());
+    }
+
+    /**
+     * 按**指定的源快照**名称化剪贴板。
+     * 跨会话搬运的关键：源区块里的数字必须用「源存档写档时的那套编号」来解释，
+     * 而不是当前会话的编号——否则变过号的方块会被读成同族的其它方块（实测林业串块的根因）。
+     */
+    public static byte[] exportClipboardNamed(java.util.Map<Long, byte[]> clipboard,
+                                              com.chunkops.core.RegistrySnapshot srcSnap) {
         try {
             java.util.List<com.chunkops.verify.NbtNode> roots = new java.util.ArrayList<com.chunkops.verify.NbtNode>();
             for (byte[] payload : clipboard.values()) {
                 roots.add(com.chunkops.core.RegionWriter.unpackChunk(payload));
             }
-            return com.chunkops.core.Mcops.exportChunks(roots, liveSnapshot(), "", "gui-clipboard");
+            return com.chunkops.core.Mcops.exportChunks(roots, srcSnap, "", "gui-clipboard");
         } catch (Exception e) {
             return null;
         }
