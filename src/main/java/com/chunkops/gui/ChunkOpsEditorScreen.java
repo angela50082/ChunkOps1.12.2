@@ -25,6 +25,7 @@ public class ChunkOpsEditorScreen extends GuiScreen {
 
     private static final int BTN_BACK = 3;
     private static final int BTN_READONLY = 4;
+    private static final int BTN_REPAIR = 5;
 
     private final List<WorldSummary> worlds = new ArrayList<WorldSummary>();
     private int selectedWorld = -1;
@@ -151,8 +152,17 @@ public class ChunkOpsEditorScreen extends GuiScreen {
         try {
             GuiOps.ensureWorldMark(currentWorldDir);
             registryDrift = !GuiOps.worldMarkMatches(currentWorldDir);
+            if (!registryDrift && currentDimDir != null) {
+                // 指纹说没问题，但数据可能被回滚/外部改过：抽样看有没有大量认不出的编号
+                foreignNumbering = GuiOps.sampleUnknownRatio(currentDimDir, 24) > 0.02;
+            }
         } catch (Throwable ignored) {
             // 指纹读写失败：静默（不影响编辑功能）
+        }
+        if (registryDrift) {
+            logLine(ChunkOpsLang.t("chunkops.log.driftWarn"));
+        } else if (foreignNumbering) {
+            logLine(ChunkOpsLang.t("chunkops.log.foreignWarn"));
         } else if (ChunkOpsRepairScreen.consumeRepaired(currentWorldDir)) {
             logLine(ChunkOpsLang.t("chunkops.log.driftFixed"));
         }
@@ -240,6 +250,8 @@ public class ChunkOpsEditorScreen extends GuiScreen {
                 ChunkOpsLang.t("chunkops.button.back")));
         this.buttonList.add(new GuiButton(BTN_READONLY, this.width - 170, y, 80, 20,
                 readOnlyLabel()));
+        this.buttonList.add(new GuiButton(BTN_REPAIR, this.width - 254, y, 80, 20,
+                ChunkOpsLang.t("chunkops.button.repair")));
         worldMenuOpen = false;
         dimMenuOpen = false;
     }

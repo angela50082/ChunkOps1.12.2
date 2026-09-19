@@ -116,6 +116,9 @@ chunkops.config.hint1=入口说明：主菜单按钮可能被主菜单美化模�
 chunkops.config.hint2=从「模组列表 → ChunkOps → 配置」进入始终可用。
 
 # ---- 注册表编号漂移 / 修复（阶段 A/B） ----
+chunkops.ui.drift=⚠ 编号已漂移
+chunkops.button.repair=修复编号
+chunkops.log.driftWarn=[警告] 该存档是在另一套编号下写入的（mods 目录变过，编号已重排），直接编辑或进游戏会把方块显示成别的东西——点右上「修复编号」可对齐
 chunkops.log.driftFixed=编号已修复并对齐当前会话
 chunkops.repair.title=注册表编号修复
 chunkops.repair.current=当前会话编号: %s
@@ -140,6 +143,7 @@ chunkops.repair.hint2=用存档记录的旧快照按「方块名+meta」对齐�
 chunkops.log.clipboardCleared=编号已修复：剪贴板已作废（剪贴板里是修复前的数字，请重新复制）
 chunkops.log.driftPasteWarn=[警告] 该存档编号已漂移：粘贴内容本身经名称化转换（不会错），但目标区域原有方块仍是旧编号
 chunkops.log.pasteUnknownWarn=[警告] 剪贴板里有当前注册表认不出的方块编号：再按一次 Ctrl+V 仍会写入，但这些方块在目标世界会显示成别的方块
+chunkops.log.foreignWarn=[警告] 抽样自检：这个存档的数据与当前编号不符（可能被回滚或外部改过），从它复制会串成同族的错误方块——请先用「修复编号」对齐
 chunkops.repair.undo=撤销修复（用 .mcabackup 还原到修复前）
 chunkops.repair.undoDone=已撤销：还原 %d 个 region（从修复前的备份）并恢复存档指纹
 chunkops.log.copySrcSnap=复制：按源存档记录的编号快照（%s）解释方块
