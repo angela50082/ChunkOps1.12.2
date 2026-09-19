@@ -312,3 +312,24 @@ The UI is localized (`en_us` / `zh_cn`) and follows your game language setting; 
 **Credits:** developed by [angela50082](https://github.com/angela50082); code, artwork (cover/logo) and documentation were produced with assistance from **DeepSeek (AI)**, with all design decisions and in-game testing done by the author.
 
 </details>
+
+---
+
+## 跨会话搬运是怎么做到不串块的（2026-09-17 重大更新）
+
+**一句话**：**编号转换发生在「粘贴」那一刻，而且只作用于粘贴出来的那些区块。**
+
+1.12.2 的存档里，方块只有数字（`stateId = 注册号<<4 | meta`），而这个数字的含义由**当前会话的注册表**决定；
+mods 目录一变，注册表就重排，同一个数字就变成别的方块。所以跨会话搬运的正确做法是：
+
+```
+复制：源区块的数字  --(源存档自己记录的编号快照)-->  方块名
+粘贴：方块名        --(当前会话的注册表)-------->  目标编号  → 只写入粘贴出来的区块
+```
+
+- **复制**用的是 `saves/<源存档>/chunkops/registry-at-write.json` 指向的那份编号快照（每次启动都会把快照留档到 `chunkops/snapshots/`）；
+- **粘贴**按方块名重解析成当前注册表的编号，**存档里其它数据一律不动**（不再需要"修复整个存档"）；
+- 因此：**同一个存档里增删模组，只要两边都在同一会话下创建/写入，就不会串块**；跨会话创建的两个存档之间也能正确搬运——实测**多方块机器可以正确识别结构**；
+- 从**没有编号记录**的老存档（本功能装上之前创建的）复制时，会用当前会话的编号解释，并给出明确警告——这类存档的历史编号无法反推。
+
+> 相关：`[ChunkOps-i18n]`、`[ChunkOps-diag]` 等自检日志见 README 常见问题；命令行工具 `RegistryRepairTool` 仍保留（供高级用户离线核对/翻译编号）。
